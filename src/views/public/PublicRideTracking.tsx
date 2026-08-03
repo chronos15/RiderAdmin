@@ -711,8 +711,8 @@ function PublicRideMap({
     map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-left');
 
-    const onUserGesture = (event: { originalEvent?: unknown }) => {
-      if (!event.originalEvent) return;
+    const onUserGesture = (event: mapboxgl.MapboxEvent) => {
+      if (!('originalEvent' in event) || !event.originalEvent) return;
       map.stop();
       setFollowingMode(false);
     };
