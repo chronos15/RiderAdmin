@@ -3,6 +3,8 @@ import mapboxgl, { GeoJSONSource, LngLatBounds, Map as MapboxMap, Marker } from 
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   CarFront,
+  ChevronDown,
+  ChevronUp,
   Clock3,
   LocateFixed,
   MapPin,
@@ -80,6 +82,7 @@ export function PublicRideTracking({
   const [error, setError] = useState<string | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [detailsExpanded, setDetailsExpanded] = useState(true);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -213,7 +216,7 @@ export function PublicRideTracking({
   if (!data) return null;
 
   return (
-    <main className="public-track-page">
+    <main className={`public-track-page ${detailsExpanded ? '' : 'public-track-sheet-collapsed'}`}>
       <PublicRideMap
         theme={theme}
         data={data}
@@ -245,79 +248,110 @@ export function PublicRideTracking({
         </div>
       </header>
 
-      <section className="public-track-card" aria-live="polite">
-        <div className="public-track-handle" />
-        <div className="public-track-status-row">
-          <div className={`public-track-status-icon ${status.tone}`}>
-            {status.icon}
-          </div>
-          <div className="public-track-status-copy">
-            <span>{status.eyebrow}</span>
-            <h1>{status.title}</h1>
-            <p>{status.description}</p>
-          </div>
-          {refreshing ? <div className="spinner public-track-mini-spinner" /> : null}
-        </div>
+      <section
+        className={`public-track-card ${detailsExpanded ? '' : 'collapsed'}`}
+        aria-live="polite"
+      >
+        <button
+          type="button"
+          className="public-track-sheet-toggle"
+          aria-expanded={detailsExpanded}
+          aria-label={detailsExpanded ? 'Ocultar detalhes da viagem' : 'Mostrar detalhes da viagem'}
+          onClick={() => setDetailsExpanded((value) => !value)}
+        >
+          <span className="public-track-handle" aria-hidden="true" />
+          {detailsExpanded ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+        </button>
 
-        <div className="public-track-driver">
-          <div className="public-track-driver-avatar">
-            <CarFront size={22} />
-          </div>
-          <div className="public-track-driver-copy">
-            <strong>{data.driver.name}</strong>
-            <span>{vehicleLabel(data)}</span>
-          </div>
-          <div className="public-track-driver-meta">
-            {data.driver.rating != null ? (
-              <span><Star size={14} fill="currentColor" /> {data.driver.rating.toFixed(1)}</span>
-            ) : null}
-            {data.vehicle.plate ? <strong>{data.vehicle.plate}</strong> : null}
-          </div>
-        </div>
-
-        <div className="public-track-route-summary">
-          <div className="public-track-route-line" aria-hidden="true">
-            <i className="pickup" />
-            <span />
-            <i className="destination" />
-          </div>
-          <div className="public-track-addresses">
-            <div>
-              <small>Embarque</small>
-              <strong>{data.ride.pickup_address ?? 'Local de embarque'}</strong>
+        {!detailsExpanded ? (
+          <div className="public-track-collapsed-summary">
+            <div className={`public-track-status-icon ${status.tone}`}>
+              {status.icon}
             </div>
             <div>
-              <small>Destino</small>
-              <strong>{data.ride.destination_address ?? 'Destino da viagem'}</strong>
+              <small>{status.eyebrow}</small>
+              <strong>{status.title}</strong>
+            </div>
+            <div className="public-track-collapsed-metrics">
+              <span>{formatDuration(metrics.durationS)}</span>
+              <span>{formatDistance(metrics.distanceM)}</span>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="public-track-card-content">
+            <div className="public-track-status-row">
+              <div className={`public-track-status-icon ${status.tone}`}>
+                {status.icon}
+              </div>
+              <div className="public-track-status-copy">
+                <span>{status.eyebrow}</span>
+                <h1>{status.title}</h1>
+                <p>{status.description}</p>
+              </div>
+              {refreshing ? <div className="spinner public-track-mini-spinner" /> : null}
+            </div>
 
-        <div className="public-track-metrics">
-          <div>
-            <Clock3 size={17} />
-            <span>Tempo estimado</span>
-            <strong>{formatDuration(metrics.durationS)}</strong>
-          </div>
-          <div>
-            <Navigation size={17} />
-            <span>Distância restante</span>
-            <strong>{formatDistance(metrics.distanceM)}</strong>
-          </div>
-          <div>
-            <MapPin size={17} />
-            <span>Próximo ponto</span>
-            <strong>{target.label}</strong>
-          </div>
-        </div>
+            <div className="public-track-driver">
+              <div className="public-track-driver-avatar">
+                <CarFront size={22} />
+              </div>
+              <div className="public-track-driver-copy">
+                <strong>{data.driver.name}</strong>
+                <span>{vehicleLabel(data)}</span>
+              </div>
+              <div className="public-track-driver-meta">
+                {data.driver.rating != null ? (
+                  <span><Star size={14} fill="currentColor" /> {data.driver.rating.toFixed(1)}</span>
+                ) : null}
+                {data.vehicle.plate ? <strong>{data.vehicle.plate}</strong> : null}
+              </div>
+            </div>
 
-        <footer className="public-track-footer">
-          <ShieldCheck size={17} />
-          <span>
-            A posição é atualizada durante a viagem. Dados pessoais sensíveis não são exibidos.
-          </span>
-          <time>{lastUpdatedAt ? relativeUpdate(lastUpdatedAt) : 'Atualizando...'}</time>
-        </footer>
+            <div className="public-track-route-summary">
+              <div className="public-track-route-line" aria-hidden="true">
+                <i className="pickup" />
+                <span />
+                <i className="destination" />
+              </div>
+              <div className="public-track-addresses">
+                <div>
+                  <small>Embarque</small>
+                  <strong>{data.ride.pickup_address ?? 'Local de embarque'}</strong>
+                </div>
+                <div>
+                  <small>Destino</small>
+                  <strong>{data.ride.destination_address ?? 'Destino da viagem'}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="public-track-metrics">
+              <div>
+                <Clock3 size={17} />
+                <span>Tempo estimado</span>
+                <strong>{formatDuration(metrics.durationS)}</strong>
+              </div>
+              <div>
+                <Navigation size={17} />
+                <span>Distância restante</span>
+                <strong>{formatDistance(metrics.distanceM)}</strong>
+              </div>
+              <div>
+                <MapPin size={17} />
+                <span>Próximo ponto</span>
+                <strong>{target.label}</strong>
+              </div>
+            </div>
+
+            <footer className="public-track-footer">
+              <ShieldCheck size={17} />
+              <span>
+                A posição é atualizada durante a viagem. Dados pessoais sensíveis não são exibidos.
+              </span>
+              <time>{lastUpdatedAt ? relativeUpdate(lastUpdatedAt) : 'Atualizando...'}</time>
+            </footer>
+          </div>
+        )}
       </section>
     </main>
   );
@@ -705,17 +739,28 @@ function PublicRideMap({
       style: theme === 'dark' ? env.mapboxStyleDark : env.mapboxStyleLight,
       center: initial,
       zoom: 14,
+      interactive: true,
       attributionControl: false,
       logoPosition: 'bottom-left',
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-left');
 
-    const onUserGesture = (event: mapboxgl.MapboxEvent) => {
-      if (!('originalEvent' in event) || !event.originalEvent) return;
-      map.stop();
+    map.scrollZoom.enable();
+    map.boxZoom.enable();
+    map.dragRotate.enable();
+    map.dragPan.enable();
+    map.keyboard.enable();
+    map.doubleClickZoom.enable();
+    map.touchZoomRotate.enable();
+
+    const onUserGesture = () => {
       setFollowingMode(false);
     };
+    const canvasContainer = map.getCanvasContainer();
+    const onUserPointerIntent = () => setFollowingMode(false);
+    canvasContainer.addEventListener('pointerdown', onUserPointerIntent, { passive: true });
+    canvasContainer.addEventListener('wheel', onUserPointerIntent, { passive: true });
     map.on('dragstart', onUserGesture);
     map.on('zoomstart', onUserGesture);
     map.on('rotatestart', onUserGesture);
@@ -739,6 +784,12 @@ function PublicRideMap({
       lastDriverSourceAtRef.current = null;
       lastDriverArrivalAtRef.current = null;
       lastDriverRouteProgressRef.current = null;
+      canvasContainer.removeEventListener('pointerdown', onUserPointerIntent);
+      canvasContainer.removeEventListener('wheel', onUserPointerIntent);
+      map.off('dragstart', onUserGesture);
+      map.off('zoomstart', onUserGesture);
+      map.off('rotatestart', onUserGesture);
+      map.off('pitchstart', onUserGesture);
       map.remove();
       mapRef.current = null;
     };
@@ -773,17 +824,16 @@ function PublicRideMap({
   return (
     <>
       <div ref={containerRef} className="public-track-map" />
-      {!following ? (
-        <button
-          type="button"
-          className="public-track-recenter"
-          onClick={recenterDriver}
-          aria-label="Recentralizar no motorista"
-        >
-          <LocateFixed size={19} />
-          <span>Motorista</span>
-        </button>
-      ) : null}
+      <button
+        type="button"
+        className={`public-track-recenter ${following ? 'is-following' : ''}`}
+        onClick={recenterDriver}
+        aria-label="Recentralizar no motorista"
+        aria-pressed={following}
+      >
+        <LocateFixed size={19} />
+        <span>{following ? 'Centralizado' : 'Recentralizar'}</span>
+      </button>
     </>
   );
 }

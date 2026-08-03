@@ -715,7 +715,7 @@ select, .date-filter { min-height: 42px; border: 1px solid var(--border); border
   max-height: calc(100dvh - 104px);
   overflow-y: auto;
   transform: translateX(-50%);
-  padding: 10px 20px 17px;
+  padding: 7px 20px 17px;
   border: 1px solid var(--border);
   border-radius: 26px;
   background: color-mix(in srgb, var(--surface) 96%, transparent);
@@ -723,12 +723,82 @@ select, .date-filter { min-height: 42px; border: 1px solid var(--border); border
   backdrop-filter: blur(22px);
   overscroll-behavior: contain;
 }
+.public-track-card.collapsed {
+  width: min(calc(100% - 32px), 620px);
+  max-height: none;
+  overflow: hidden;
+  padding: 6px 14px 12px;
+  border-radius: 21px;
+}
+.public-track-card-content { min-width: 0; }
+.public-track-sheet-toggle {
+  width: 100%;
+  min-height: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  touch-action: manipulation;
+}
+.public-track-sheet-toggle:hover { color: var(--text); }
+.public-track-sheet-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
 .public-track-handle {
   width: 42px;
   height: 4px;
-  margin: 0 auto 12px;
+  margin: 0;
   border-radius: 999px;
   background: var(--border-strong);
+}
+.public-track-collapsed-summary {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.public-track-collapsed-summary .public-track-status-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+}
+.public-track-collapsed-summary small,
+.public-track-collapsed-summary strong { display: block; }
+.public-track-collapsed-summary small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.public-track-collapsed-summary strong {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.public-track-collapsed-metrics {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .public-track-status-row {
   display: grid;
@@ -861,6 +931,13 @@ select, .date-filter { min-height: 42px; border: 1px solid var(--border); border
   font-weight: 600;
 }
 .public-track-recenter svg { color: var(--primary); }
+.public-track-recenter.is-following {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+.public-track-recenter.is-following svg { color: var(--green); }
+.public-track-sheet-collapsed .public-track-map .mapboxgl-ctrl-bottom-right { bottom: 92px; }
+.public-track-sheet-collapsed .public-track-recenter { bottom: 102px; }
 .public-track-driver-marker {
   width: 38px;
   height: 38px;
@@ -955,6 +1032,16 @@ select, .date-filter { min-height: 42px; border: 1px solid var(--border); border
     border-left: 0;
     border-radius: 25px 25px 0 0;
   }
+  .public-track-card.collapsed {
+    bottom: 0;
+    width: 100%;
+    max-height: none;
+    padding: 5px 12px max(10px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 21px 21px 0 0;
+  }
   .public-track-status-row { grid-template-columns: 42px minmax(0, 1fr) auto; gap: 10px; }
   .public-track-status-icon { width: 42px; height: 42px; border-radius: 14px; }
   .public-track-status-copy p { max-width: 95%; }
@@ -966,6 +1053,12 @@ select, .date-filter { min-height: 42px; border: 1px solid var(--border); border
   .public-track-footer time { display: none; }
   .public-track-map .mapboxgl-ctrl-bottom-right { bottom: min(59vh, 540px); bottom: min(59dvh, 540px); }
   .public-track-recenter { right: 58px; bottom: min(59vh, 540px); bottom: min(59dvh, 540px); transform: translateY(-48px); }
+  .public-track-sheet-collapsed .public-track-map .mapboxgl-ctrl-bottom-right { bottom: 78px; }
+  .public-track-sheet-collapsed .public-track-recenter {
+    right: 58px;
+    bottom: 88px;
+    transform: none;
+  }
 }
 
 @media (max-width: 430px) {
