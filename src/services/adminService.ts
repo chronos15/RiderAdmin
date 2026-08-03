@@ -181,13 +181,32 @@ export const adminService = {
   },
 
   async activeOperation() {
-    const [drivers, rides] = await Promise.all([
+    const [driversResult, ridesResult] = await Promise.all([
       supabase.from('driver_public_locations').select('*').eq('is_online', true).order('last_location_at', { ascending: false }),
-      supabase.from('rides').select('*, client:profiles!rides_client_id_fkey(name), driver:drivers!rides_driver_id_fkey(id, profiles!drivers_user_id_fkey(name))').in('status', ['accepted', 'driver_arriving', 'driver_arrived', 'in_progress']).order('created_at', { ascending: false }),
+      supabase.from('rides').select('*, client:profiles!rides_client_id_fkey(name,phone), driver:drivers!rides_driver_id_fkey(id, profiles!drivers_user_id_fkey(name,phone)), vehicle:vehicles(id,brand,model,color,plate,vehicle_type)').in('status', ['accepted', 'driver_arriving', 'driver_arrived', 'in_progress']).order('created_at', { ascending: false }),
     ]);
-    if (drivers.error) throw drivers.error;
-    if (rides.error) throw rides.error;
-    return { drivers: drivers.data ?? [], rides: rides.data ?? [] };
+    if (driversResult.error) throw driversResult.error;
+    if (ridesResult.error) throw ridesResult.error;
+
+    const drivers = driversResult.data ?? [];
+    const rides = ridesResult.data ?? [];
+    const rideIds = rides.map((ride: any) => ride.id).filter(Boolean);
+    const navigationResult = rideIds.length
+      ? await supabase.from('ride_navigation_routes').select('*').in('ride_id', rideIds)
+      : { data: [] as any[], error: null };
+    if (navigationResult.error) throw navigationResult.error;
+
+    const driverLocations = new Map(drivers.map((driver: any) => [driver.driver_id, driver]));
+    const navigationRoutes = new Map((navigationResult.data ?? []).map((route: any) => [route.ride_id, route]));
+
+    return {
+      drivers,
+      rides: rides.map((ride: any) => ({
+        ...ride,
+        live_driver: driverLocations.get(ride.driver_id) ?? null,
+        navigation_route: navigationRoutes.get(ride.id) ?? null,
+      })),
+    };
   },
 
   async cancelRide(rideId: string, reason: string) {
@@ -451,6 +470,7 @@ export const adminService = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_public_locations' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ride_locations' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ride_navigation_routes' }, onChange)
       .subscribe();
   },
 

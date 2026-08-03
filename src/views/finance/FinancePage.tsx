@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CSSProperties } from 'react';
 import {
   Activity, AlertTriangle, BadgeDollarSign, Banknote, CalendarDays, CheckCircle2,
   Download, HandCoins, RefreshCw, RotateCcw, ShieldAlert, Wallet, WalletCards,
 } from 'lucide-react';
 import { adminService } from '../../services/adminService';
 import { Badge, dateTime, EmptyState, humanize, LoadingState, money, PageHeader, Section, StatCard } from '../../components/Ui';
+import { DailyGmvChart, RevenueCompositionChart } from '../../components/AdminCharts';
 
 export function FinancePage() {
   const [from, setFrom] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10));
@@ -48,8 +48,7 @@ export function FinancePage() {
       map.set(day, (map.get(day) ?? 0) + Number(ride.final_price ?? 0));
     });
     const rows = Array.from(map.entries()).slice(-14);
-    const max = Math.max(1, ...rows.map(([, value]) => value));
-    return rows.map(([day, value]) => ({ day, value, height: Math.max(8, (value / max) * 100) }));
+    return rows.map(([day, value]) => ({ day, value }));
   }, [data]);
 
   const transactions = useMemo(
@@ -183,14 +182,11 @@ export function FinancePage() {
       <div className="dashboard-grid">
         <Section title="GMV diário" description="Comportamento financeiro do período selecionado." className="chart-surface">
           {daily.length
-            ? <div className="bar-chart finance-chart">{daily.map((item) => <div className="bar-column" key={item.day}><div className="bar-value">{money(item.value)}</div><div className="bar-track"><span style={{ height: `${item.height}%` }}/></div><small>{item.day}</small></div>)}</div>
+            ? <DailyGmvChart data={daily}/>
             : <EmptyState title="Sem movimento no período" description="Nenhuma corrida concluída entre as datas selecionadas."/>}
         </Section>
         <Section title="Composição" description="Distribuição do valor das corridas.">
-          <div className="donut-summary">
-            <div className="donut" style={{ '--platform': `${data?.gmv ? (data.fees / data.gmv) * 100 : 0}%` } as CSSProperties}><div><strong>{data?.gmv ? ((data.fees / data.gmv) * 100).toFixed(1) : '0'}%</strong><span>taxa média</span></div></div>
-            <div className="legend-list"><div><i className="legend-platform"/><span>Plataforma</span><strong>{money(data?.fees)}</strong></div><div><i className="legend-driver"/><span>Motoristas</span><strong>{money(data?.driverEarnings)}</strong></div></div>
-          </div>
+          <RevenueCompositionChart platform={Number(data?.fees ?? 0)} drivers={Number(data?.driverEarnings ?? 0)}/>
         </Section>
       </div>
       <Section title="Carteiras dos motoristas" description="Saldo negativo representa taxas da plataforma ainda não compensadas. Ajustes administrativos ficam registrados no razão.">

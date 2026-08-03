@@ -3,6 +3,7 @@ import { Activity, BadgeDollarSign, CarFront, Headphones, ShieldAlert, Star, Use
 import { adminService } from '../../services/adminService';
 import { supabase } from '../../services/supabaseService';
 import { Badge, dateTime, EmptyState, LoadingState, money, PageHeader, Section, StatCard } from '../../components/Ui';
+import { HourlyRidesChart } from '../../components/AdminCharts';
 
 export function AdminDashboard({ onNavigate }: { onNavigate: (view: any) => void }) {
   const [data, setData] = useState<Record<string, any> | null>(null);
@@ -32,8 +33,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (view: any) => void
       const item = values.find((entry) => Number(entry.hour.replace('h', '')) === hour);
       if (item) item.count += 1;
     });
-    const max = Math.max(1, ...values.map((item) => item.count));
-    return values.map((item) => ({ ...item, height: Math.max(8, (item.count / max) * 100) }));
+    return values;
   }, [rides]);
 
   if (loading) return <LoadingState label="Montando visão operacional..."/>;
@@ -53,7 +53,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (view: any) => void
 
     <div className="dashboard-grid">
       <Section title="Movimento por horário" description="Distribuição das corridas recentes ao longo do dia." className="chart-surface">
-        <div className="bar-chart" aria-label="Corridas por horário">{hourly.map((item) => <div className="bar-column" key={item.hour}><div className="bar-value">{item.count}</div><div className="bar-track"><span style={{ height: `${item.height}%` }}/></div><small>{item.hour}</small></div>)}</div>
+        <HourlyRidesChart data={hourly}/>
       </Section>
       <Section title="Saúde da operação" description="Leitura rápida da capacidade atual.">
         <div className="health-list">
