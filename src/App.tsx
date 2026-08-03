@@ -18,8 +18,10 @@ import { RatingsManagement } from './views/ratings/RatingsManagement';
 import { OperationsSettings } from './views/settings/OperationsSettings';
 import { AuditPage } from './views/audit/AuditPage';
 import { LoadingState } from './components/Ui';
+import { PublicRideTracking } from './views/public/PublicRideTracking';
 
 const demoMode = import.meta.env.VITE_ADMIN_DEMO_MODE === 'true';
+const publicRideToken = new URLSearchParams(window.location.search).get('rideToken')?.trim() ?? '';
 
 export function App() {
   const { theme, toggleTheme } = useTheme();
@@ -44,6 +46,7 @@ export function App() {
   }
 
   useEffect(() => {
+    if (publicRideToken) { setLoading(false); return; }
     resolveAuth();
     if (demoMode) return;
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => { resolveAuth(nextSession); });
@@ -59,6 +62,9 @@ export function App() {
   function navigate(next: AdminView) { setView(next); window.history.replaceState(null, '', `#/${next}`); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   async function signOut() { if (!demoMode) await authService.signOut(); setSession(null); setProfile(null); }
 
+  if (publicRideToken) {
+    return <PublicRideTracking token={publicRideToken} theme={theme} onToggleTheme={toggleTheme}/>;
+  }
   if (loading) return <div className="full-loading"><LoadingState label="Validando acesso administrativo..."/></div>;
   if (!demoMode && (!session || !profile)) return <AdminLogin onAuthenticated={() => resolveAuth()}/>;
 

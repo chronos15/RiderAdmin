@@ -266,6 +266,29 @@ export const adminService = {
     };
   },
 
+  async financialIntegrity(limit = 100) {
+    const { data, error } = await supabase.rpc('admin_financial_integrity_report_rpc', { p_limit: limit });
+    if (!error) return data ?? { summary: {}, issues: [] };
+    if (error.code !== 'PGRST202' && !String(error.message).includes('Could not find the function')) throw error;
+    const fallback = await supabase.functions.invoke('financial_reconciliation', {
+      body: { action: 'preview', limit },
+    });
+    if (fallback.error) throw fallback.error;
+    const envelope = fallback.data && typeof fallback.data === 'object' ? fallback.data as Record<string, any> : {};
+    if (envelope.error) throw new Error(readableServiceError(envelope.error, 'Falha ao gerar diagnóstico financeiro.'));
+    return envelope.data?.report ?? envelope.report ?? { summary: {}, issues: [] };
+  },
+
+  async reconcileFinancial(limit = 25) {
+    const { data, error } = await supabase.functions.invoke('financial_reconciliation', {
+      body: { action: 'run', limit },
+    });
+    if (error) throw error;
+    const envelope = data && typeof data === 'object' ? data as Record<string, any> : {};
+    if (envelope.error) throw new Error(readableServiceError(envelope.error, 'Falha ao conciliar pagamentos.'));
+    return envelope.data ?? envelope;
+  },
+
   async adjustDriverWallet(driverId: string, amount: number, reason: string) {
     const { data, error } = await supabase.rpc('admin_adjust_driver_wallet_rpc', {
       p_driver_id: driverId,
@@ -373,7 +396,7 @@ export const adminService = {
     if (usesAsaas) {
       const health = await this.asaasHealth();
       if (!health.ready) throw new Error(health.message || 'Asaas não está configurado no backend.');
-      if (!health.webhook_ready) throw new Error('Configure ASAAS_WEBHOOK_TOKEN antes de ativar o Asaas.');
+      if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure ASAAS_WEBHOOK_TOKEN e publique asaas_webhook antes de ativar o Asaas.');
     }
     const { data, error } = await supabase.from('platform_operation_settings').upsert({ id: 1, ...payload }).select().single();
     if (error) throw error;

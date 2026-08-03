@@ -587,3 +587,369 @@ select, .date-filter { min-height: 42px; border: 1px solid var(--border); border
 }
 
 .section-note { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* =====================================================
+   Acompanhamento público de viagem
+   ===================================================== */
+.public-track-page {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+}
+.public-track-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--surface-soft);
+}
+.public-track-map-missing {
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--muted);
+}
+.public-track-map-missing strong { color: var(--text); font-weight: 500; }
+.public-track-map .mapboxgl-ctrl-bottom-left { bottom: 6px; }
+.public-track-map .mapboxgl-ctrl-bottom-right { bottom: 276px; right: 12px; }
+.public-track-map .mapboxgl-ctrl-group {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+.public-track-map .mapboxgl-ctrl-group button { width: 38px; height: 38px; }
+.public-track-map .mapboxgl-ctrl-attrib {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  color: var(--muted);
+}
+.public-track-topbar {
+  position: absolute;
+  z-index: 10;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  pointer-events: none;
+}
+.public-track-brand,
+.public-track-actions {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.public-track-brand {
+  min-height: 52px;
+  padding: 7px 12px 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--surface) 93%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+.public-track-brand-mark {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--primary);
+  color: var(--primary-text);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -.06em;
+}
+.public-track-brand strong,
+.public-track-brand span { display: block; }
+.public-track-brand strong { font-size: 15px; font-weight: 600; letter-spacing: -.035em; }
+.public-track-brand span { margin-top: 1px; color: var(--muted); font-size: 10px; }
+.public-track-connection {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--surface) 93%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  font-size: 11px;
+  font-weight: 500;
+}
+.public-track-connection.online { color: var(--green); }
+.public-track-connection.offline { color: var(--amber); }
+.public-track-icon-button {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--surface) 93%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  cursor: pointer;
+}
+.public-track-card {
+  position: absolute;
+  z-index: 9;
+  left: 50%;
+  bottom: 16px;
+  width: min(calc(100% - 32px), 760px);
+  max-height: calc(100vh - 104px);
+  max-height: calc(100dvh - 104px);
+  overflow-y: auto;
+  transform: translateX(-50%);
+  padding: 10px 20px 17px;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 22px 70px rgba(0,0,0,.18);
+  backdrop-filter: blur(22px);
+  overscroll-behavior: contain;
+}
+.public-track-handle {
+  width: 42px;
+  height: 4px;
+  margin: 0 auto 12px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+.public-track-status-row {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.public-track-status-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+.public-track-status-icon.arrived,
+.public-track-status-icon.completed { color: var(--green); background: var(--green-soft); }
+.public-track-status-icon.cancelled { color: var(--red); background: var(--red-soft); }
+.public-track-status-copy span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+.public-track-status-copy h1 {
+  margin: 2px 0 2px;
+  font-size: clamp(19px, 3.6vw, 25px);
+  font-weight: 600;
+  letter-spacing: -.045em;
+}
+.public-track-status-copy p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.public-track-mini-spinner { width: 17px; height: 17px; }
+.public-track-driver {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  margin-top: 15px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--surface-soft);
+}
+.public-track-driver-avatar {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--primary);
+  color: var(--primary-text);
+}
+.public-track-driver-copy strong,
+.public-track-driver-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.public-track-driver-copy strong { font-size: 14px; font-weight: 600; }
+.public-track-driver-copy span { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.public-track-driver-meta { display: grid; justify-items: end; gap: 5px; }
+.public-track-driver-meta span { display: inline-flex; align-items: center; gap: 4px; color: var(--amber); font-size: 11px; font-weight: 600; }
+.public-track-driver-meta strong { font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.public-track-route-summary {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  gap: 11px;
+  margin-top: 15px;
+}
+.public-track-route-line { display: grid; grid-template-rows: 12px 1fr 12px; justify-items: center; min-height: 72px; }
+.public-track-route-line i { width: 10px; height: 10px; border: 3px solid var(--surface); box-shadow: 0 0 0 2px var(--border-strong); }
+.public-track-route-line i.pickup { border-radius: 999px; background: var(--blue); }
+.public-track-route-line i.destination { border-radius: 3px; background: var(--text); }
+.public-track-route-line span { width: 1px; min-height: 35px; background: var(--border-strong); }
+.public-track-addresses { display: grid; gap: 12px; }
+.public-track-addresses div { min-width: 0; }
+.public-track-addresses small,
+.public-track-addresses strong { display: block; }
+.public-track-addresses small { color: var(--muted); font-size: 10px; }
+.public-track-addresses strong { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.public-track-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 15px;
+}
+.public-track-metrics > div {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface);
+}
+.public-track-metrics svg { color: var(--muted); }
+.public-track-metrics span,
+.public-track-metrics strong { display: block; }
+.public-track-metrics span { margin-top: 8px; color: var(--muted); font-size: 9px; }
+.public-track-metrics strong { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.public-track-footer {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  margin-top: 13px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.public-track-footer svg { color: var(--green); }
+.public-track-footer time { white-space: nowrap; }
+.public-track-driver-marker {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #fff;
+  border-radius: 14px;
+  background: #111;
+  box-shadow: 0 8px 22px rgba(0,0,0,.30);
+  transition: transform 1.3s linear;
+}
+.public-track-driver-marker span {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 16px solid #fff;
+  transform: translateY(-1px);
+}
+.public-track-pickup-marker {
+  width: 19px;
+  height: 19px;
+  border: 4px solid #fff;
+  border-radius: 999px;
+  background: #7c3aed;
+  box-shadow: 0 5px 18px rgba(0,0,0,.24);
+}
+:root[data-theme='dark'] .public-track-pickup-marker { background: #f98518; }
+.public-track-destination-marker {
+  position: relative;
+  width: 34px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+}
+.public-track-destination-marker::before {
+  content: '';
+  position: absolute;
+  width: 25px;
+  height: 25px;
+  border: 3px solid #fff;
+  border-radius: 50% 50% 50% 5px;
+  background: #111;
+  box-shadow: 0 7px 20px rgba(0,0,0,.28);
+  transform: translateY(-3px) rotate(-45deg);
+}
+.public-track-destination-marker span {
+  position: relative;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  margin-top: -8px;
+  border-radius: 999px;
+  background: #fff;
+}
+.public-track-loading,
+.public-track-error-page { display: grid; place-items: center; padding: 24px; }
+.public-track-loading-card,
+.public-track-error-card {
+  width: min(100%, 410px);
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 30px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.public-track-loading-card strong { font-size: 17px; font-weight: 600; }
+.public-track-loading-card span,
+.public-track-error-card p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.public-track-error-card h1 { margin: 2px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.04em; }
+.public-track-error-card > svg { color: var(--red); }
+
+@media (max-width: 680px) {
+  .public-track-topbar { top: max(10px, env(safe-area-inset-top)); left: 10px; right: 10px; }
+  .public-track-brand { min-height: 46px; padding: 5px 9px 5px 5px; border-radius: 15px; }
+  .public-track-brand-mark { width: 35px; height: 35px; border-radius: 11px; }
+  .public-track-brand span { display: none; }
+  .public-track-connection { min-height: 36px; padding: 0 9px; }
+  .public-track-icon-button { width: 36px; height: 36px; }
+  .public-track-card {
+    bottom: 0;
+    width: 100%;
+    max-height: min(58vh, 530px);
+    max-height: min(58dvh, 530px);
+    padding: 8px 14px max(14px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 25px 25px 0 0;
+  }
+  .public-track-status-row { grid-template-columns: 42px minmax(0, 1fr) auto; gap: 10px; }
+  .public-track-status-icon { width: 42px; height: 42px; border-radius: 14px; }
+  .public-track-status-copy p { max-width: 95%; }
+  .public-track-driver { margin-top: 12px; padding: 10px; }
+  .public-track-route-summary { margin-top: 12px; }
+  .public-track-metrics { margin-top: 12px; }
+  .public-track-metrics > div { padding: 9px; }
+  .public-track-footer { margin-top: 10px; grid-template-columns: 17px minmax(0, 1fr); }
+  .public-track-footer time { display: none; }
+  .public-track-map .mapboxgl-ctrl-bottom-right { bottom: min(59vh, 540px); bottom: min(59dvh, 540px); }
+}
+
+@media (max-width: 430px) {
+  .public-track-connection { font-size: 0; gap: 0; width: 36px; justify-content: center; }
+  .public-track-connection svg { width: 16px; height: 16px; }
+  .public-track-status-copy h1 { font-size: 19px; }
+  .public-track-status-copy p { font-size: 11px; }
+  .public-track-driver-meta strong { display: none; }
+  .public-track-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .public-track-metrics > div:last-child { grid-column: span 2; }
+}
