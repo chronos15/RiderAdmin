@@ -72,6 +72,16 @@ function asText(value: unknown): string | null {
   return parsed.length ? parsed : null;
 }
 
+function asLatitude(value: unknown): number | null {
+  const parsed = asNumber(value);
+  return parsed != null && parsed >= -90 && parsed <= 90 ? parsed : null;
+}
+
+function asLongitude(value: unknown): number | null {
+  const parsed = asNumber(value);
+  return parsed != null && parsed >= -180 && parsed <= 180 ? parsed : null;
+}
+
 function normalizePayload(value: unknown): SharedRidePayload {
   if (!value || typeof value !== 'object') {
     throw new Error('A viagem compartilhada retornou dados inválidos.');
@@ -96,10 +106,10 @@ function normalizePayload(value: unknown): SharedRidePayload {
       status: asText(ride.status) ?? 'accepted',
       pickup_address: asText(ride.pickup_address),
       destination_address: asText(ride.destination_address),
-      pickup_lat: asNumber(ride.pickup_lat),
-      pickup_lng: asNumber(ride.pickup_lng),
-      destination_lat: asNumber(ride.destination_lat),
-      destination_lng: asNumber(ride.destination_lng),
+      pickup_lat: asLatitude(ride.pickup_lat),
+      pickup_lng: asLongitude(ride.pickup_lng),
+      destination_lat: asLatitude(ride.destination_lat),
+      destination_lng: asLongitude(ride.destination_lng),
       started_at: asText(ride.started_at),
       created_at: asText(ride.created_at),
       updated_at: asText(ride.updated_at),
@@ -115,10 +125,10 @@ function normalizePayload(value: unknown): SharedRidePayload {
       plate: asText(vehicle.plate),
       vehicle_type: asText(vehicle.vehicle_type),
     },
-    location: location && asNumber(location.lat) != null && asNumber(location.lng) != null
+    location: location && asLatitude(location.lat) != null && asLongitude(location.lng) != null
       ? {
-          lat: asNumber(location.lat)!,
-          lng: asNumber(location.lng)!,
+          lat: asLatitude(location.lat)!,
+          lng: asLongitude(location.lng)!,
           bearing: asNumber(location.bearing),
           speed_mps: asNumber(location.speed_mps),
           accuracy_m: asNumber(location.accuracy_m),

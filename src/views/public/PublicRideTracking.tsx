@@ -320,14 +320,15 @@ function PublicRideMap({
     const currentData = dataRef.current;
     const currentRoute = routeRef.current;
     const isDark = themeRef.current === 'dark';
+    const safeRouteCoordinates = currentRoute.coordinates.filter(isValidCoordinate);
 
-    const routeData = currentRoute.coordinates.length >= 2
+    const routeData = safeRouteCoordinates.length >= 2
       ? {
           type: 'Feature',
           properties: {},
           geometry: {
             type: 'LineString',
-            coordinates: currentRoute.coordinates,
+            coordinates: safeRouteCoordinates,
           },
         }
       : { type: 'FeatureCollection', features: [] };
@@ -372,8 +373,11 @@ function PublicRideMap({
       });
     }
 
-    const location = currentData.location;
+    const location = currentData.location
+      ? pointOf(currentData.location.lat, currentData.location.lng)
+      : null;
     if (location) {
+      const coordinate: Coordinate = [location.lng, location.lat];
       if (!driverMarkerRef.current) {
         const element = document.createElement('div');
         element.className = 'public-track-driver-marker';
@@ -382,21 +386,35 @@ function PublicRideMap({
           element,
           rotationAlignment: 'map',
           pitchAlignment: 'map',
-        }).addTo(map);
+        })
+          .setLngLat(coordinate)
+          .setRotation(normalizeBearing(currentData.location?.bearing))
+          .addTo(map);
+      } else {
+        driverMarkerRef.current
+          .setLngLat(coordinate)
+          .setRotation(normalizeBearing(currentData.location?.bearing));
       }
-      driverMarkerRef.current
-        .setLngLat([location.lng, location.lat])
-        .setRotation(location.bearing ?? 0);
+    } else if (driverMarkerRef.current) {
+      driverMarkerRef.current.remove();
+      driverMarkerRef.current = null;
     }
 
     const pickup = pointOf(currentData.ride.pickup_lat, currentData.ride.pickup_lng);
     if (pickup) {
+      const coordinate: Coordinate = [pickup.lng, pickup.lat];
       if (!pickupMarkerRef.current) {
         const element = document.createElement('div');
         element.className = 'public-track-pickup-marker';
-        pickupMarkerRef.current = new mapboxgl.Marker({ element }).addTo(map);
+        pickupMarkerRef.current = new mapboxgl.Marker({ element })
+          .setLngLat(coordinate)
+          .addTo(map);
+      } else {
+        pickupMarkerRef.current.setLngLat(coordinate);
       }
-      pickupMarkerRef.current.setLngLat([pickup.lng, pickup.lat]);
+    } else if (pickupMarkerRef.current) {
+      pickupMarkerRef.current.remove();
+      pickupMarkerRef.current = null;
     }
 
     const destination = pointOf(
@@ -404,23 +422,33 @@ function PublicRideMap({
       currentData.ride.destination_lng,
     );
     if (destination) {
+      const coordinate: Coordinate = [destination.lng, destination.lat];
       if (!destinationMarkerRef.current) {
         const element = document.createElement('div');
         element.className = 'public-track-destination-marker';
         element.innerHTML = '<span></span>';
-        destinationMarkerRef.current = new mapboxgl.Marker({ element, anchor: 'bottom' }).addTo(map);
+        destinationMarkerRef.current = new mapboxgl.Marker({ element, anchor: 'bottom' })
+          .setLngLat(coordinate)
+          .addTo(map);
+      } else {
+        destinationMarkerRef.current.setLngLat(coordinate);
       }
-      destinationMarkerRef.current.setLngLat([destination.lng, destination.lat]);
+    } else if (destinationMarkerRef.current) {
+      destinationMarkerRef.current.remove();
+      destinationMarkerRef.current = null;
     }
 
     const fitKey = `${currentData.ride.id}|${currentData.ride.status}|${currentRoute.key}`;
     if (fitKey !== lastFitKeyRef.current) {
       lastFitKeyRef.current = fitKey;
       const bounds = new LngLatBounds();
-      currentRoute.coordinates.forEach((coordinate) => bounds.extend(coordinate));
+      safeRouteCoordinates.forEach((coordinate) => bounds.extend(coordinate));
       if (location) bounds.extend([location.lng, location.lat]);
-      if (targetRef.current.point) {
-        bounds.extend([targetRef.current.point.lng, targetRef.current.point.lat]);
+      const currentTarget = targetRef.current?.point
+        ? pointOf(targetRef.current.point.lat, targetRef.current.point.lng)
+        : null;
+      if (currentTarget) {
+        bounds.extend([currentTarget.lng, currentTarget.lat]);
       }
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds, {
@@ -429,11 +457,8 @@ function PublicRideMap({
           duration: 850,
         });
       }
-    } else if (location) {
-      const bounds = map.getBounds();
-      if (bounds && !bounds.contains([location.lng, location.lat])) {
-        map.easeTo({ center: [location.lng, location.lat], duration: 650 });
-      }
+    } else if (location && !map.getBounds()?.contains([location.lng, location.lat])) {
+      map.easeTo({ center: [location.lng, location.lat], duration: 650 });
     }
   }, []);
 
@@ -441,11 +466,17 @@ function PublicRideMap({
     if (!containerRef.current || !env.mapboxAccessToken) return;
     readyRef.current = false;
     lastFitKeyRef.current = '';
-    const initial = data.location
-      ? [data.location.lng, data.location.lat] as Coordinate
-      : target.point
-        ? [target.point.lng, target.point.lat] as Coordinate
-        : [-40.3128, -20.3155] as Coordinate;
+    const initialLocation = data.location
+      ? pointOf(data.location.lat, data.location.lng)
+      : null;
+    const initialTarget = target.point
+      ? pointOf(target.point.lat, target.point.lng)
+      : null;
+    const initial: Coordinate = initialLocation
+      ? [initialLocation.lng, initialLocation.lat]
+      : initialTarget
+        ? [initialTarget.lng, initialTarget.lat]
+        : [-40.3128, -20.3155];
     const map = new mapboxgl.Map({
       accessToken: env.mapboxAccessToken,
       container: containerRef.current,
@@ -516,12 +547,14 @@ function useSharedRideRoute(data: SharedRidePayload | null): RouteState {
       }
     }
 
-    const start = data.location;
+    const start = data.location
+      ? pointOf(data.location.lat, data.location.lng)
+      : null;
     const target = activeTarget(data).point;
     if (!start || !target) return { type: 'none' as const };
     return {
       type: 'mapbox' as const,
-      start: { lat: start.lat, lng: start.lng },
+      start,
       target,
       key: `mapbox:${start.lat.toFixed(4)},${start.lng.toFixed(4)}:${target.lat.toFixed(5)},${target.lng.toFixed(5)}`,
     };
@@ -563,7 +596,9 @@ function useSharedRideRoute(data: SharedRidePayload | null): RouteState {
         }>;
       })
       .then((response) => {
-        const coordinatesResult = response.routes?.[0]?.geometry?.coordinates ?? [];
+        const coordinatesResult = (
+          response.routes?.[0]?.geometry?.coordinates ?? []
+        ).filter(isValidCoordinate);
         if (coordinatesResult.length >= 2) {
           setRoute({ coordinates: coordinatesResult, key: routeInput.key, source: 'mapbox' });
         } else {
@@ -624,9 +659,27 @@ function decodePolyline(encoded: string, precisionDigits: 5 | 6): Coordinate[] {
   return coordinates;
 }
 
+function isValidCoordinate(value: unknown): value is Coordinate {
+  if (!Array.isArray(value) || value.length < 2) return false;
+  const lng = Number(value[0]);
+  const lat = Number(value[1]);
+  return Number.isFinite(lng)
+    && Number.isFinite(lat)
+    && lng >= -180
+    && lng <= 180
+    && lat >= -90
+    && lat <= 90;
+}
+
 function pointOf(lat: number | null, lng: number | null): SharedRidePoint | null {
   if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return { lat, lng };
+}
+
+function normalizeBearing(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 0;
+  return ((value % 360) + 360) % 360;
 }
 
 function activeTarget(data: SharedRidePayload | null): { point: SharedRidePoint | null; label: string } {
