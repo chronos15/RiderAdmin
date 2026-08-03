@@ -3,11 +3,7 @@ import mapboxgl, { type GeoJSONSource, type Map as MapboxMap } from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type { ThemeMode } from '../../types/admin';
 import { LocateFixed, MousePointer2, RotateCcw, Trash2, Undo2 } from 'lucide-react';
-// Minimal GeoJSON types to avoid requiring the 'geojson' package
-type GeoJSONPolygon = { type: 'Polygon'; coordinates: number[][][] };
-type GeoJSONMultiPolygon = { type: 'MultiPolygon'; coordinates: number[][][][] };
-type GeoJSONFeature = { type: 'Feature'; properties: Record<string, any>; geometry: GeoJSONPolygon | GeoJSONMultiPolygon | null };
-type GeoJSONFeatureCollection = { type: 'FeatureCollection'; features: GeoJSONFeature[] };
+import type * as GeoJSON from 'geojson';
 
 type Position = [number, number];
 
@@ -34,7 +30,7 @@ function pointsToPolygon(points: Position[]): GeoJSON.Polygon | null {
 
 function editablePoints(value: Props['value']): Position[] {
   if (!value || value.type !== 'Polygon' || !value.coordinates[0]?.length) return [];
-  return value.coordinates[0].slice(0, -1).map(([lng, lat]: [number, number]): Position => [lng, lat]);
+  return value.coordinates[0].slice(0, -1).map(([lng, lat]) => [lng, lat]);
 }
 
 export function RegionMapEditor({ theme, value, onChange }: Props) {
@@ -75,9 +71,9 @@ export function RegionMapEditor({ theme, value, onChange }: Props) {
       map.addLayer({ id: 'service-area-fill', type: 'fill', source: 'service-area', paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.2 } });
       map.addLayer({ id: 'service-area-line', type: 'line', source: 'service-area', paint: { 'line-color': '#2563eb', 'line-width': 3 } });
       if (value) {
-        const coordinates = (value.type === 'Polygon' ? value.coordinates.flat(1) : value.coordinates.flat(2)) as Position[];
+        const coordinates = value.type === 'Polygon' ? value.coordinates.flat(1) : value.coordinates.flat(2);
         if (coordinates.length) {
-          const bounds = coordinates.reduce((box, coordinate: Position) => box.extend(coordinate), new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]));
+          const bounds = coordinates.reduce((box, coordinate) => box.extend(coordinate as Position), new mapboxgl.LngLatBounds(coordinates[0] as Position, coordinates[0] as Position));
           map.fitBounds(bounds, { padding: 55, maxZoom: 14, duration: 0 });
         }
       } else if (navigator.geolocation) {
