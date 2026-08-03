@@ -4,6 +4,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   CarFront,
   Clock3,
+  LocateFixed,
   MapPin,
   Moon,
   Navigation,
@@ -20,6 +21,7 @@ import {
   publicRideService,
   type SharedRidePayload,
   type SharedRidePoint,
+  type SharedRideStatus,
 } from '../../services/publicRideService';
 
 type Coordinate = [number, number];
@@ -28,9 +30,40 @@ type RouteState = {
   coordinates: Coordinate[];
   key: string;
   source: 'navigation' | 'mapbox' | 'none';
+  distanceM: number | null;
+  durationS: number | null;
 };
 
-const emptyRoute: RouteState = { coordinates: [], key: 'empty', source: 'none' };
+type RouteMetrics = {
+  distanceM: number | null;
+  durationS: number | null;
+};
+
+type RouteProjection = {
+  coordinate: Coordinate;
+  segmentIndex: number;
+  segmentFraction: number;
+  distanceToRouteM: number;
+  distanceAlongRouteM: number;
+};
+
+type DriverMotionPlan = {
+  path: Coordinate[];
+  cumulativeM: number[];
+  totalM: number;
+  startBearing: number;
+  endBearing: number;
+  startedAtMs: number;
+  durationMs: number;
+};
+
+const emptyRoute: RouteState = {
+  coordinates: [],
+  key: 'empty',
+  source: 'none',
+  distanceM: null,
+  durationS: null,
+};
 
 export function PublicRideTracking({
   token,
@@ -141,6 +174,10 @@ export function PublicRideTracking({
   }, [token]);
 
   const route = useSharedRideRoute(data);
+  const metrics = useMemo(
+    () => estimateRemainingRouteMetrics(route, data?.location ?? null, data?.ride.status),
+    [route, data?.location, data?.ride.status],
+  );
   const status = statusPresentation(data?.ride.status ?? 'accepted');
   const target = activeTarget(data);
 
@@ -260,12 +297,12 @@ export function PublicRideTracking({
           <div>
             <Clock3 size={17} />
             <span>Tempo estimado</span>
-            <strong>{formatDuration(data.navigation_route?.duration_s)}</strong>
+            <strong>{formatDuration(metrics.durationS)}</strong>
           </div>
           <div>
             <Navigation size={17} />
             <span>Distância restante</span>
-            <strong>{formatDistance(data.navigation_route?.distance_m)}</strong>
+            <strong>{formatDistance(metrics.distanceM)}</strong>
           </div>
           <div>
             <MapPin size={17} />
@@ -307,12 +344,224 @@ function PublicRideMap({
   const driverMarkerRef = useRef<Marker | null>(null);
   const pickupMarkerRef = useRef<Marker | null>(null);
   const destinationMarkerRef = useRef<Marker | null>(null);
+  const driverVisualCoordinateRef = useRef<Coordinate | null>(null);
+  const driverVisualBearingRef = useRef(0);
+  const driverMotionPlanRef = useRef<DriverMotionPlan | null>(null);
+  const driverAnimationFrameRef = useRef<number | null>(null);
+  const lastDriverSourceAtRef = useRef<number | null>(null);
+  const lastDriverArrivalAtRef = useRef<number | null>(null);
+  const lastDriverRouteProgressRef = useRef<number | null>(null);
+  const lastDriverRouteKeyRef = useRef('');
   const lastFitKeyRef = useRef('');
+  const followingRef = useRef(true);
+  const [following, setFollowing] = useState(true);
 
   dataRef.current = data;
   routeRef.current = route;
   targetRef.current = target;
   themeRef.current = theme;
+
+  const setFollowingMode = useCallback((value: boolean) => {
+    followingRef.current = value;
+    setFollowing(value);
+  }, []);
+
+  const stopDriverAnimation = useCallback(() => {
+    if (driverAnimationFrameRef.current != null) {
+      window.cancelAnimationFrame(driverAnimationFrameRef.current);
+      driverAnimationFrameRef.current = null;
+    }
+    driverMotionPlanRef.current = null;
+  }, []);
+
+  const runDriverAnimation = useCallback(() => {
+    if (driverAnimationFrameRef.current != null) return;
+
+    const tick = (now: number) => {
+      const marker = driverMarkerRef.current;
+      const plan = driverMotionPlanRef.current;
+      if (!marker || !plan) {
+        driverAnimationFrameRef.current = null;
+        return;
+      }
+
+      const sample = sampleDriverMotion(plan, now);
+      driverVisualCoordinateRef.current = sample.coordinate;
+      driverVisualBearingRef.current = sample.bearing;
+      marker
+        .setLngLat(sample.coordinate)
+        .setRotation(sample.bearing);
+
+      if (sample.complete) {
+        driverMotionPlanRef.current = null;
+        driverAnimationFrameRef.current = null;
+        return;
+      }
+      driverAnimationFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    driverAnimationFrameRef.current = window.requestAnimationFrame(tick);
+  }, []);
+
+  const updateDriverMotion = useCallback((currentData: SharedRidePayload, currentRoute: RouteState) => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+
+    const rawPoint = currentData.location
+      ? pointOf(currentData.location.lat, currentData.location.lng)
+      : null;
+    if (!rawPoint) {
+      stopDriverAnimation();
+      driverMarkerRef.current?.remove();
+      driverMarkerRef.current = null;
+      driverVisualCoordinateRef.current = null;
+      lastDriverSourceAtRef.current = null;
+      lastDriverArrivalAtRef.current = null;
+      lastDriverRouteProgressRef.current = null;
+      return;
+    }
+
+    const now = performance.now();
+    const sourceAt = parseTimestampMs(currentData.location?.created_at);
+    const previousSourceAt = lastDriverSourceAtRef.current;
+    if (sourceAt != null && previousSourceAt != null && sourceAt <= previousSourceAt) {
+      return;
+    }
+
+    const rawCoordinate: Coordinate = [rawPoint.lng, rawPoint.lat];
+    const routeCoordinates = currentRoute.coordinates.filter(isValidCoordinate);
+    const accuracy = clampNumber(currentData.location?.accuracy_m ?? 25, 1, 150);
+    const snapThresholdM = clampNumber(accuracy * 1.8, 22, 60);
+    const targetProjection = projectCoordinateOnRoute(rawCoordinate, routeCoordinates);
+    const targetCoordinate = targetProjection && targetProjection.distanceToRouteM <= snapThresholdM
+      ? targetProjection.coordinate
+      : rawCoordinate;
+
+    if (lastDriverRouteKeyRef.current !== currentRoute.key) {
+      lastDriverRouteKeyRef.current = currentRoute.key;
+      lastDriverRouteProgressRef.current = null;
+    }
+
+    if (!driverMarkerRef.current) {
+      const element = document.createElement('div');
+      element.className = 'public-track-driver-marker';
+      element.innerHTML = '<span></span>';
+      const initialBearing = normalizeBearing(currentData.location?.bearing);
+      driverMarkerRef.current = new mapboxgl.Marker({
+        element,
+        rotationAlignment: 'viewport',
+        pitchAlignment: 'viewport',
+      })
+        .setLngLat(targetCoordinate)
+        .setRotation(initialBearing)
+        .addTo(map);
+      driverVisualCoordinateRef.current = targetCoordinate;
+      driverVisualBearingRef.current = initialBearing;
+      lastDriverSourceAtRef.current = sourceAt;
+      lastDriverArrivalAtRef.current = now;
+      lastDriverRouteProgressRef.current = targetProjection?.distanceAlongRouteM ?? null;
+      return;
+    }
+
+    const activePlan = driverMotionPlanRef.current;
+    if (activePlan) {
+      const currentSample = sampleDriverMotion(activePlan, now);
+      driverVisualCoordinateRef.current = currentSample.coordinate;
+      driverVisualBearingRef.current = currentSample.bearing;
+      driverMarkerRef.current
+        .setLngLat(currentSample.coordinate)
+        .setRotation(currentSample.bearing);
+    }
+
+    const currentCoordinate = driverVisualCoordinateRef.current ?? targetCoordinate;
+    const currentBearing = driverVisualBearingRef.current;
+    const directDistanceM = distanceMeters(currentCoordinate, targetCoordinate);
+    const stationaryNoiseM = clampNumber(accuracy * 0.16, 1.2, 3.8);
+    const speedMps = Math.max(0, currentData.location?.speed_mps ?? 0);
+
+    if (directDistanceM <= stationaryNoiseM && speedMps < 0.8) {
+      lastDriverSourceAtRef.current = sourceAt;
+      lastDriverArrivalAtRef.current = now;
+      return;
+    }
+
+    const currentProjection = projectCoordinateOnRoute(currentCoordinate, routeCoordinates);
+    const previousProgress = lastDriverRouteProgressRef.current;
+    if (
+      targetProjection
+      && previousProgress != null
+      && targetProjection.distanceAlongRouteM < previousProgress
+    ) {
+      const backwardsM = previousProgress - targetProjection.distanceAlongRouteM;
+      const toleratedBackwardsM = clampNumber(accuracy * 0.6, 4, 15);
+      if (backwardsM <= toleratedBackwardsM || backwardsM <= 32) {
+        lastDriverSourceAtRef.current = sourceAt;
+        lastDriverArrivalAtRef.current = now;
+        return;
+      }
+    }
+
+    let path: Coordinate[] = [currentCoordinate, targetCoordinate];
+    const canFollowRoute = currentProjection
+      && targetProjection
+      && currentProjection.distanceToRouteM <= snapThresholdM * 1.25
+      && targetProjection.distanceToRouteM <= snapThresholdM
+      && targetProjection.distanceAlongRouteM >= currentProjection.distanceAlongRouteM;
+    if (canFollowRoute) {
+      path = buildRouteSubpath(routeCoordinates, currentProjection, targetProjection);
+    }
+    path = normalizeCoordinatePath(path, targetCoordinate);
+
+    const motionDistanceM = polylineDistanceMeters(path);
+    const arrivalDeltaMs = lastDriverArrivalAtRef.current == null
+      ? null
+      : now - lastDriverArrivalAtRef.current;
+    const sourceDeltaMs = sourceAt != null && previousSourceAt != null
+      ? sourceAt - previousSourceAt
+      : null;
+    const observedIntervalMs = validUpdateInterval(sourceDeltaMs)
+      ?? validUpdateInterval(arrivalDeltaMs)
+      ?? 3000;
+    const longGap = observedIntervalMs > 8000;
+    const plausibleDistanceM = (observedIntervalMs / 1000) * 65 + accuracy * 2;
+    if (!longGap && motionDistanceM > Math.max(160, plausibleDistanceM)) {
+      lastDriverSourceAtRef.current = sourceAt;
+      lastDriverArrivalAtRef.current = now;
+      return;
+    }
+
+    const durationMs = motionDurationMs(observedIntervalMs, motionDistanceM, longGap);
+    const targetBearing = resolveDriverBearing({
+      previous: currentBearing,
+      reported: currentData.location?.bearing,
+      path,
+      speedMps,
+    });
+    const cumulativeM = cumulativeDistancesMeters(path);
+    driverMotionPlanRef.current = {
+      path,
+      cumulativeM,
+      totalM: cumulativeM.length ? cumulativeM[cumulativeM.length - 1] : 0,
+      startBearing: currentBearing,
+      endBearing: targetBearing,
+      startedAtMs: now,
+      durationMs,
+    };
+    lastDriverSourceAtRef.current = sourceAt;
+    lastDriverArrivalAtRef.current = now;
+    lastDriverRouteProgressRef.current = targetProjection?.distanceAlongRouteM
+      ?? lastDriverRouteProgressRef.current;
+
+    if (followingRef.current) {
+      map.easeTo({
+        center: targetCoordinate,
+        duration: durationMs,
+        easing: linearEasing,
+        essential: true,
+      });
+    }
+    runDriverAnimation();
+  }, [runDriverAnimation, stopDriverAnimation]);
 
   const renderMap = useCallback(() => {
     const map = mapRef.current;
@@ -373,33 +622,6 @@ function PublicRideMap({
       });
     }
 
-    const location = currentData.location
-      ? pointOf(currentData.location.lat, currentData.location.lng)
-      : null;
-    if (location) {
-      const coordinate: Coordinate = [location.lng, location.lat];
-      if (!driverMarkerRef.current) {
-        const element = document.createElement('div');
-        element.className = 'public-track-driver-marker';
-        element.innerHTML = '<span></span>';
-        driverMarkerRef.current = new mapboxgl.Marker({
-          element,
-          rotationAlignment: 'map',
-          pitchAlignment: 'map',
-        })
-          .setLngLat(coordinate)
-          .setRotation(normalizeBearing(currentData.location?.bearing))
-          .addTo(map);
-      } else {
-        driverMarkerRef.current
-          .setLngLat(coordinate)
-          .setRotation(normalizeBearing(currentData.location?.bearing));
-      }
-    } else if (driverMarkerRef.current) {
-      driverMarkerRef.current.remove();
-      driverMarkerRef.current = null;
-    }
-
     const pickup = pointOf(currentData.ride.pickup_lat, currentData.ride.pickup_lng);
     if (pickup) {
       const coordinate: Coordinate = [pickup.lng, pickup.lat];
@@ -438,18 +660,19 @@ function PublicRideMap({
       destinationMarkerRef.current = null;
     }
 
-    const fitKey = `${currentData.ride.id}|${currentData.ride.status}|${currentRoute.key}`;
+    updateDriverMotion(currentData, currentRoute);
+
+    const fitKey = `${currentData.ride.id}|${currentData.ride.status}`;
     if (fitKey !== lastFitKeyRef.current) {
       lastFitKeyRef.current = fitKey;
       const bounds = new LngLatBounds();
       safeRouteCoordinates.forEach((coordinate) => bounds.extend(coordinate));
-      if (location) bounds.extend([location.lng, location.lat]);
-      const currentTarget = targetRef.current?.point
+      const visualLocation = driverVisualCoordinateRef.current;
+      if (visualLocation) bounds.extend(visualLocation);
+      const currentTarget = targetRef.current.point
         ? pointOf(targetRef.current.point.lat, targetRef.current.point.lng)
         : null;
-      if (currentTarget) {
-        bounds.extend([currentTarget.lng, currentTarget.lat]);
-      }
+      if (currentTarget) bounds.extend([currentTarget.lng, currentTarget.lat]);
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds, {
           padding: { top: 105, right: 55, bottom: 330, left: 55 },
@@ -457,15 +680,14 @@ function PublicRideMap({
           duration: 850,
         });
       }
-    } else if (location && !map.getBounds()?.contains([location.lng, location.lat])) {
-      map.easeTo({ center: [location.lng, location.lat], duration: 650 });
     }
-  }, []);
+  }, [updateDriverMotion]);
 
   useEffect(() => {
     if (!containerRef.current || !env.mapboxAccessToken) return;
     readyRef.current = false;
     lastFitKeyRef.current = '';
+    setFollowingMode(true);
     const initialLocation = data.location
       ? pointOf(data.location.lat, data.location.lng)
       : null;
@@ -488,6 +710,16 @@ function PublicRideMap({
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-left');
+
+    const onUserGesture = (event: { originalEvent?: unknown }) => {
+      if (!event.originalEvent) return;
+      map.stop();
+      setFollowingMode(false);
+    };
+    map.on('dragstart', onUserGesture);
+    map.on('zoomstart', onUserGesture);
+    map.on('rotatestart', onUserGesture);
+    map.on('pitchstart', onUserGesture);
     map.on('load', () => {
       readyRef.current = true;
       renderMap();
@@ -496,20 +728,38 @@ function PublicRideMap({
 
     return () => {
       readyRef.current = false;
+      stopDriverAnimation();
       driverMarkerRef.current?.remove();
       pickupMarkerRef.current?.remove();
       destinationMarkerRef.current?.remove();
       driverMarkerRef.current = null;
       pickupMarkerRef.current = null;
       destinationMarkerRef.current = null;
+      driverVisualCoordinateRef.current = null;
+      lastDriverSourceAtRef.current = null;
+      lastDriverArrivalAtRef.current = null;
+      lastDriverRouteProgressRef.current = null;
       map.remove();
       mapRef.current = null;
     };
-  }, [theme, renderMap]);
+  }, [theme, renderMap, setFollowingMode, stopDriverAnimation]);
 
   useEffect(() => {
     renderMap();
   }, [data, route, target, renderMap]);
+
+  const recenterDriver = useCallback(() => {
+    const map = mapRef.current;
+    const coordinate = driverVisualCoordinateRef.current;
+    if (!map || !coordinate) return;
+    setFollowingMode(true);
+    map.easeTo({
+      center: coordinate,
+      zoom: Math.max(map.getZoom(), 15),
+      duration: 650,
+      essential: true,
+    });
+  }, [setFollowingMode]);
 
   if (!env.mapboxAccessToken) {
     return (
@@ -520,7 +770,22 @@ function PublicRideMap({
     );
   }
 
-  return <div ref={containerRef} className="public-track-map" />;
+  return (
+    <>
+      <div ref={containerRef} className="public-track-map" />
+      {!following ? (
+        <button
+          type="button"
+          className="public-track-recenter"
+          onClick={recenterDriver}
+          aria-label="Recentralizar no motorista"
+        >
+          <LocateFixed size={19} />
+          <span>Motorista</span>
+        </button>
+      ) : null}
+    </>
+  );
 }
 
 function useSharedRideRoute(data: SharedRidePayload | null): RouteState {
@@ -542,6 +807,8 @@ function useSharedRideRoute(data: SharedRidePayload | null): RouteState {
         return {
           type: 'navigation' as const,
           coordinates,
+          distanceM: navigation.distance_m,
+          durationS: navigation.duration_s,
           key: `navigation:${navigation.route_id ?? ''}:${stringSignature(navigation.encoded_polyline)}`,
         };
       }
@@ -570,7 +837,13 @@ function useSharedRideRoute(data: SharedRidePayload | null): RouteState {
       return;
     }
     if (routeInput.type === 'navigation') {
-      setRoute({ coordinates: routeInput.coordinates, key: routeInput.key, source: 'navigation' });
+      setRoute({
+        coordinates: routeInput.coordinates,
+        key: routeInput.key,
+        source: 'navigation',
+        distanceM: finitePositive(routeInput.distanceM),
+        durationS: finitePositive(routeInput.durationS),
+      });
       return;
     }
     if (!env.mapboxAccessToken) {
@@ -578,7 +851,6 @@ function useSharedRideRoute(data: SharedRidePayload | null): RouteState {
       return;
     }
 
-    setRoute(emptyRoute);
     const controller = new AbortController();
     const coordinates = `${routeInput.start.lng},${routeInput.start.lat};${routeInput.target.lng},${routeInput.target.lat}`;
     const url = new URL(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordinates}`);
@@ -592,27 +864,357 @@ function useSharedRideRoute(data: SharedRidePayload | null): RouteState {
       .then(async (response) => {
         if (!response.ok) throw new Error(`Mapbox Directions HTTP ${response.status}`);
         return response.json() as Promise<{
-          routes?: Array<{ geometry?: { coordinates?: Coordinate[] } }>;
+          routes?: Array<{
+            geometry?: { coordinates?: Coordinate[] };
+            distance?: number;
+            duration?: number;
+          }>;
         }>;
       })
       .then((response) => {
+        const selectedRoute = response.routes?.[0];
         const coordinatesResult = (
-          response.routes?.[0]?.geometry?.coordinates ?? []
+          selectedRoute?.geometry?.coordinates ?? []
         ).filter(isValidCoordinate);
         if (coordinatesResult.length >= 2) {
-          setRoute({ coordinates: coordinatesResult, key: routeInput.key, source: 'mapbox' });
-        } else {
-          setRoute(emptyRoute);
+          setRoute({
+            coordinates: coordinatesResult,
+            key: routeInput.key,
+            source: 'mapbox',
+            distanceM: finitePositive(selectedRoute?.distance),
+            durationS: finitePositive(selectedRoute?.duration),
+          });
         }
       })
       .catch((routeError) => {
-        if ((routeError as Error).name !== 'AbortError') setRoute(emptyRoute);
+        if ((routeError as Error).name !== 'AbortError') {
+          // Mantém a rota anterior para evitar sumiço e piscadas durante uma falha transitória.
+        }
       });
 
     return () => controller.abort();
   }, [routeInputKey]);
 
   return route;
+}
+
+function estimateRemainingRouteMetrics(
+  route: RouteState,
+  location: SharedRidePayload['location'],
+  status: SharedRideStatus | undefined,
+): RouteMetrics {
+  if (status === 'completed' || status === 'cancelled') {
+    return { distanceM: 0, durationS: 0 };
+  }
+
+  const coordinates = route.coordinates.filter(isValidCoordinate);
+  if (coordinates.length < 2) {
+    return { distanceM: null, durationS: null };
+  }
+
+  const geometryDistanceM = polylineDistanceMeters(coordinates);
+  if (geometryDistanceM <= 0) {
+    return { distanceM: null, durationS: null };
+  }
+
+  const baseDistanceM = finitePositive(route.distanceM) ?? geometryDistanceM;
+  let remainingRatio = 1;
+  if (location) {
+    const point = pointOf(location.lat, location.lng);
+    if (point) {
+      const projection = projectCoordinateOnRoute([point.lng, point.lat], coordinates);
+      if (projection && projection.distanceToRouteM <= 140) {
+        const geometryRemainingM = Math.max(
+          0,
+          geometryDistanceM - projection.distanceAlongRouteM,
+        );
+        remainingRatio = clampNumber(geometryRemainingM / geometryDistanceM, 0, 1);
+      }
+    }
+  }
+
+  const distanceM = Math.max(0, baseDistanceM * remainingRatio);
+  const baseDurationS = finitePositive(route.durationS);
+  const durationS = baseDurationS != null
+    ? Math.max(0, baseDurationS * remainingRatio)
+    : distanceM / estimatedTravelSpeedMps(location?.speed_mps);
+
+  return { distanceM, durationS };
+}
+
+function estimatedTravelSpeedMps(value: number | null | undefined): number {
+  if (value != null && Number.isFinite(value) && value >= 2) {
+    return clampNumber(value, 4, 22);
+  }
+  return 8.33;
+}
+
+function sampleDriverMotion(
+  plan: DriverMotionPlan,
+  nowMs: number,
+): { coordinate: Coordinate; bearing: number; complete: boolean } {
+  const fraction = plan.durationMs <= 0
+    ? 1
+    : clampNumber((nowMs - plan.startedAtMs) / plan.durationMs, 0, 1);
+  return {
+    coordinate: coordinateAtDistance(
+      plan.path,
+      plan.cumulativeM,
+      plan.totalM * fraction,
+    ),
+    bearing: interpolateBearing(plan.startBearing, plan.endBearing, fraction),
+    complete: fraction >= 1,
+  };
+}
+
+function parseTimestampMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function validUpdateInterval(value: number | null): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return value >= 150 && value <= 60_000 ? value : null;
+}
+
+function motionDurationMs(
+  observedIntervalMs: number,
+  distanceM: number,
+  longGap: boolean,
+): number {
+  if (distanceM < 0.5) return 0;
+  if (longGap) return clampNumber(850 + distanceM * 9, 900, 1600);
+  const continuityDuration = observedIntervalMs * 0.92;
+  if (distanceM <= 3) return clampNumber(continuityDuration, 650, 1300);
+  return clampNumber(continuityDuration, 900, 2850);
+}
+
+function resolveDriverBearing({
+  previous,
+  reported,
+  path,
+  speedMps,
+}: {
+  previous: number;
+  reported: number | null | undefined;
+  path: Coordinate[];
+  speedMps: number;
+}): number {
+  const geometry = pathBearing(path);
+  const reportedBearing = reported != null
+    && Number.isFinite(reported)
+    && speedMps >= 0.75
+      ? normalizeBearing(reported)
+      : null;
+
+  let raw = previous;
+  if (geometry != null && reportedBearing != null) {
+    raw = bearingDistance(geometry, reportedBearing) <= 55
+      ? interpolateBearing(geometry, reportedBearing, 0.24)
+      : geometry;
+  } else if (geometry != null) {
+    raw = geometry;
+  } else if (reportedBearing != null) {
+    raw = reportedBearing;
+  }
+
+  const delta = bearingDistance(previous, raw);
+  const amount = delta >= 50 ? 0.8 : delta >= 25 ? 0.62 : speedMps < 0.6 ? 0.22 : 0.44;
+  return interpolateBearing(previous, raw, amount);
+}
+
+function pathBearing(path: Coordinate[]): number | null {
+  for (let index = 0; index < path.length - 1; index += 1) {
+    if (distanceMeters(path[index], path[index + 1]) >= 1) {
+      return bearingBetween(path[index], path[index + 1]);
+    }
+  }
+  return null;
+}
+
+function bearingBetween(from: Coordinate, to: Coordinate): number {
+  const fromLat = degreesToRadians(from[1]);
+  const toLat = degreesToRadians(to[1]);
+  const deltaLng = degreesToRadians(to[0] - from[0]);
+  const y = Math.sin(deltaLng) * Math.cos(toLat);
+  const x = Math.cos(fromLat) * Math.sin(toLat)
+    - Math.sin(fromLat) * Math.cos(toLat) * Math.cos(deltaLng);
+  return normalizeBearing(radiansToDegrees(Math.atan2(y, x)));
+}
+
+function interpolateBearing(from: number, to: number, amount: number): number {
+  const normalizedFrom = normalizeBearing(from);
+  const normalizedTo = normalizeBearing(to);
+  const delta = ((normalizedTo - normalizedFrom + 540) % 360) - 180;
+  return normalizeBearing(normalizedFrom + delta * clampNumber(amount, 0, 1));
+}
+
+function bearingDistance(a: number, b: number): number {
+  const delta = Math.abs(normalizeBearing(a) - normalizeBearing(b));
+  return Math.min(delta, 360 - delta);
+}
+
+function projectCoordinateOnRoute(
+  point: Coordinate,
+  route: Coordinate[],
+): RouteProjection | null {
+  if (route.length < 2 || !isValidCoordinate(point)) return null;
+  const cumulative = cumulativeDistancesMeters(route);
+  let best: RouteProjection | null = null;
+
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const start = route[index];
+    const end = route[index + 1];
+    const projection = projectOnSegment(point, start, end);
+    const segmentDistanceM = distanceMeters(start, end);
+    const candidate: RouteProjection = {
+      coordinate: projection.coordinate,
+      segmentIndex: index,
+      segmentFraction: projection.fraction,
+      distanceToRouteM: projection.distanceM,
+      distanceAlongRouteM: cumulative[index] + segmentDistanceM * projection.fraction,
+    };
+    if (!best || candidate.distanceToRouteM < best.distanceToRouteM) best = candidate;
+  }
+  return best;
+}
+
+function projectOnSegment(
+  point: Coordinate,
+  start: Coordinate,
+  end: Coordinate,
+): { coordinate: Coordinate; fraction: number; distanceM: number } {
+  const referenceLatRad = degreesToRadians((point[1] + start[1] + end[1]) / 3);
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLng = Math.max(1, metersPerDegreeLat * Math.cos(referenceLatRad));
+  const segmentX = (end[0] - start[0]) * metersPerDegreeLng;
+  const segmentY = (end[1] - start[1]) * metersPerDegreeLat;
+  const pointX = (point[0] - start[0]) * metersPerDegreeLng;
+  const pointY = (point[1] - start[1]) * metersPerDegreeLat;
+  const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+  const fraction = lengthSquared <= 0
+    ? 0
+    : clampNumber((pointX * segmentX + pointY * segmentY) / lengthSquared, 0, 1);
+  const projectedX = segmentX * fraction;
+  const projectedY = segmentY * fraction;
+  const coordinate: Coordinate = [
+    start[0] + (end[0] - start[0]) * fraction,
+    start[1] + (end[1] - start[1]) * fraction,
+  ];
+  return {
+    coordinate,
+    fraction,
+    distanceM: Math.hypot(pointX - projectedX, pointY - projectedY),
+  };
+}
+
+function buildRouteSubpath(
+  route: Coordinate[],
+  start: RouteProjection,
+  end: RouteProjection,
+): Coordinate[] {
+  if (start.segmentIndex > end.segmentIndex) return [start.coordinate, end.coordinate];
+  const result: Coordinate[] = [start.coordinate];
+  for (let index = start.segmentIndex + 1; index <= end.segmentIndex; index += 1) {
+    const coordinate = route[index];
+    if (coordinate && distanceMeters(result[result.length - 1], coordinate) >= 0.3) {
+      result.push(coordinate);
+    }
+  }
+  if (distanceMeters(result[result.length - 1], end.coordinate) >= 0.3) {
+    result.push(end.coordinate);
+  } else {
+    result[result.length - 1] = end.coordinate;
+  }
+  return result;
+}
+
+function normalizeCoordinatePath(path: Coordinate[], target: Coordinate): Coordinate[] {
+  const normalized: Coordinate[] = [];
+  path.filter(isValidCoordinate).forEach((coordinate) => {
+    if (!normalized.length || distanceMeters(normalized[normalized.length - 1], coordinate) >= 0.3) {
+      normalized.push(coordinate);
+    }
+  });
+  if (!normalized.length) normalized.push(target);
+  if (distanceMeters(normalized[normalized.length - 1], target) >= 0.3) normalized.push(target);
+  else normalized[normalized.length - 1] = target;
+  return normalized;
+}
+
+function cumulativeDistancesMeters(path: Coordinate[]): number[] {
+  const cumulative = [0];
+  for (let index = 1; index < path.length; index += 1) {
+    cumulative.push(cumulative[index - 1] + distanceMeters(path[index - 1], path[index]));
+  }
+  return cumulative;
+}
+
+function polylineDistanceMeters(path: Coordinate[]): number {
+  return (() => { const values = cumulativeDistancesMeters(path); return values.length ? values[values.length - 1] : 0; })();
+}
+
+function coordinateAtDistance(
+  path: Coordinate[],
+  cumulativeM: number[],
+  targetDistanceM: number,
+): Coordinate {
+  if (!path.length) return [0, 0];
+  if (path.length === 1 || targetDistanceM <= 0) return path[0];
+  const totalM = cumulativeM.length ? cumulativeM[cumulativeM.length - 1] : 0;
+  if (targetDistanceM >= totalM) return path[path.length - 1];
+
+  for (let index = 0; index < cumulativeM.length - 1; index += 1) {
+    const startM = cumulativeM[index];
+    const endM = cumulativeM[index + 1];
+    if (targetDistanceM <= endM) {
+      const segmentM = endM - startM;
+      const fraction = segmentM <= 0 ? 1 : (targetDistanceM - startM) / segmentM;
+      return interpolateCoordinate(path[index], path[index + 1], fraction);
+    }
+  }
+  return path[path.length - 1];
+}
+
+function interpolateCoordinate(from: Coordinate, to: Coordinate, amount: number): Coordinate {
+  const fraction = clampNumber(amount, 0, 1);
+  return [
+    from[0] + (to[0] - from[0]) * fraction,
+    from[1] + (to[1] - from[1]) * fraction,
+  ];
+}
+
+function distanceMeters(a: Coordinate, b: Coordinate): number {
+  const earthRadiusM = 6_371_000;
+  const lat1 = degreesToRadians(a[1]);
+  const lat2 = degreesToRadians(b[1]);
+  const deltaLat = lat2 - lat1;
+  const deltaLng = degreesToRadians(b[0] - a[0]);
+  const sinLat = Math.sin(deltaLat / 2);
+  const sinLng = Math.sin(deltaLng / 2);
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+  return earthRadiusM * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
+}
+
+function finitePositive(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function degreesToRadians(value: number): number {
+  return value * Math.PI / 180;
+}
+
+function radiansToDegrees(value: number): number {
+  return value * 180 / Math.PI;
+}
+
+function linearEasing(value: number): number {
+  return value;
 }
 
 function stringSignature(value: string): string {
@@ -763,13 +1365,16 @@ function vehicleLabel(data: SharedRidePayload): string {
 
 function formatDuration(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds)) return 'Calculando';
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `${minutes} min`;
+  if (seconds <= 0) return '0 min';
+  if (seconds < 60) return '< 1 min';
+  return `${Math.max(1, Math.round(seconds / 60))} min`;
 }
 
 function formatDistance(meters: number | null | undefined): string {
   if (meters == null || !Number.isFinite(meters)) return 'Calculando';
-  if (meters < 1000) return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
+  if (meters <= 0) return '0 m';
+  if (meters < 20) return '< 20 m';
+  if (meters < 1000) return `${Math.max(20, Math.round(meters / 10) * 10)} m`;
   return `${(meters / 1000).toFixed(meters < 10000 ? 1 : 0)} km`;
 }
 
