@@ -754,7 +754,8 @@ function PublicRideMap({
     map.doubleClickZoom.enable();
     map.touchZoomRotate.enable();
 
-    const onUserGesture = () => {
+    const onUserGesture = (event: { originalEvent?: unknown }) => {
+      if (!event.originalEvent) return;
       setFollowingMode(false);
     };
     const canvasContainer = map.getCanvasContainer();

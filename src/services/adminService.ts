@@ -409,13 +409,40 @@ export const adminService = {
     return envelope.data ?? envelope;
   },
 
+  async openpixHealth() {
+    const { data, error } = await supabase.functions.invoke('openpix_gateway_admin', { body: { action: 'health' } });
+    if (error) throw error;
+    const envelope = data && typeof data === 'object' ? data as Record<string, any> : {};
+    if (envelope.error) throw new Error(readableServiceError(envelope.error, 'Falha ao validar a OpenPix.'));
+    return envelope.data ?? envelope;
+  },
+
   async savePlatformSettings(payload: Record<string, unknown>) {
+    const validProviders = new Set(['stripe', 'asaas', 'openpix']);
+    const pixProvider = String(payload.pix_online_provider ?? '').trim().toLowerCase();
+    const walletProvider = String(payload.driver_wallet_pix_provider ?? '').trim().toLowerCase();
+    if (!validProviders.has(pixProvider) || !validProviders.has(walletProvider)) {
+      throw new Error('Selecione explicitamente Stripe, Asaas ou OpenPix para cada fluxo PIX. Não existe fallback automático.');
+    }
     const usesAsaas = payload.asaas_pix_enabled === true || payload.asaas_payout_enabled === true ||
       payload.pix_online_provider === 'asaas' || payload.driver_wallet_pix_provider === 'asaas';
     if (usesAsaas) {
       const health = await this.asaasHealth();
       if (!health.ready) throw new Error(health.message || 'Asaas não está configurado no backend.');
       if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure ASAAS_WEBHOOK_TOKEN e publique asaas_webhook antes de ativar o Asaas.');
+    }
+    const usesOpenpix = payload.openpix_pix_enabled === true || payload.openpix_payout_enabled === true ||
+      payload.pix_online_provider === 'openpix' || payload.driver_wallet_pix_provider === 'openpix';
+    if (usesOpenpix) {
+      const health = await this.openpixHealth();
+      if (!health.ready) throw new Error(health.message || 'OpenPix não está configurada no backend.');
+      if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure OPENPIX_WEBHOOK_SECRETS (ou o secret legado) e publique openpix_webhook antes de ativar a OpenPix.');
+      if (payload.openpix_payout_enabled === true && !health.webhook_payout_events_ready) {
+        throw new Error(health.payout_message || 'Configure os secrets HMAC dos eventos de repasse OpenPix antes de ativar o PIX OUT.');
+      }
+      if (payload.openpix_payout_enabled === true && !health.payout_ready) {
+        throw new Error(health.payout_message || 'Habilite PIX OUT/API MASTER na OpenPix antes de ativar repasses automáticos.');
+      }
     }
     const { data, error } = await supabase.from('platform_operation_settings').upsert({ id: 1, ...payload }).select().single();
     if (error) throw error;

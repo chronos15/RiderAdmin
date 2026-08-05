@@ -28,10 +28,12 @@ const defaultSettings = {
   driver_wallet_card_enabled: true,
   driver_wallet_stripe_balance_enabled: true,
   driver_wallet_auto_recovery: true,
-  pix_online_provider: 'stripe',
-  driver_wallet_pix_provider: 'stripe',
+  pix_online_provider: '',
+  driver_wallet_pix_provider: '',
   asaas_pix_enabled: false,
   asaas_payout_enabled: false,
+  openpix_pix_enabled: false,
+  openpix_payout_enabled: false,
 };
 
 const emptyRegion = {
@@ -58,19 +60,22 @@ export function OperationsSettings({ theme, initialTab = 'categories' }: { theme
   const [regionModal, setRegionModal] = useState<any | null>(null);
   const [asaasHealth, setAsaasHealth] = useState<any | null>(null);
   const [checkingAsaas, setCheckingAsaas] = useState(false);
+  const [openpixHealth, setOpenpixHealth] = useState<any | null>(null);
+  const [checkingOpenpix, setCheckingOpenpix] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [categoryData, fareData, settingData, regionData, regionCategoryData, pushData, healthData] = await Promise.all([
+      const [categoryData, fareData, settingData, regionData, regionCategoryData, pushData, healthData, openpixHealthData] = await Promise.all([
         adminService.categories(), adminService.fareCategories(), adminService.platformSettings().catch(() => null),
         adminService.regions().catch(() => []), adminService.regionCategories().catch(() => []),
         adminService.pushOverview().catch(() => ({ tokens: [], logs: [] })),
         adminService.asaasHealth().catch((error) => ({ ready: false, webhook_ready: false, message: messageOf(error) })),
+        adminService.openpixHealth().catch((error) => ({ ready: false, webhook_ready: false, payout_ready: false, message: messageOf(error) })),
       ]);
       setCategories(categoryData); setFares(fareData); setSettings({ ...defaultSettings, ...(settingData ?? {}) });
       setRegions(regionData); setRegionCategories(regionCategoryData);
-      setPushOverview(pushData); setAsaasHealth(healthData);
+      setPushOverview(pushData); setAsaasHealth(healthData); setOpenpixHealth(openpixHealthData);
     } catch (error) {
       setNotice({ tone: 'danger', text: messageOf(error) });
     } finally { setLoading(false); }
@@ -99,6 +104,22 @@ export function OperationsSettings({ theme, initialTab = 'categories' }: { theme
     } finally { setCheckingAsaas(false); }
   }
 
+  async function checkOpenpix() {
+    setCheckingOpenpix(true); setNotice(null);
+    try {
+      const health = await adminService.openpixHealth();
+      setOpenpixHealth(health);
+      setNotice({
+        tone: health.ready && health.webhook_ready ? 'success' : 'danger',
+        text: health.message || 'Validação da OpenPix concluída.',
+      });
+    } catch (error) {
+      const message = messageOf(error);
+      setOpenpixHealth({ ready: false, webhook_ready: false, payout_ready: false, message });
+      setNotice({ tone: 'danger', text: message });
+    } finally { setCheckingOpenpix(false); }
+  }
+
   async function performSave(action: () => Promise<unknown>, success: string) {
     setSaving(true); setNotice(null);
     try { await action(); setNotice({ tone: 'success', text: success }); await load(); return true; }
@@ -107,15 +128,15 @@ export function OperationsSettings({ theme, initialTab = 'categories' }: { theme
   }
 
   return <>
-    <PageHeader title={tab === 'payments' ? 'Pagamentos e Asaas' : 'Operação e tarifas'} description={tab === 'payments' ? 'Ative o Asaas, selecione o provedor Pix e valide a conexão do gateway em um único lugar.' : 'Regras operacionais e áreas atendidas consumidas em tempo real pelos aplicativos.'}/>
+    <PageHeader title={tab === 'payments' ? 'Pagamentos e gateways' : 'Operação e tarifas'} description={tab === 'payments' ? 'Escolha Stripe, Asaas ou OpenPix sem fallback e valide cada integração separadamente.' : 'Regras operacionais e áreas atendidas consumidas em tempo real pelos aplicativos.'}/>
     {notice && <div className={`settings-notice ${notice.tone}`}><AlertCircle size={18}/><span>{notice.text}</span><button onClick={() => setNotice(null)}>Fechar</button></div>}
-    <div className="tabs"><button className={tab === 'categories' ? 'active' : ''} onClick={() => setTab('categories')}><CarFront size={18}/> Categorias e tarifas</button><button className={tab === 'dispatch' ? 'active' : ''} onClick={() => setTab('dispatch')}><Settings2 size={18}/> Despacho e plataforma</button><button className={tab === 'payments' ? 'active' : ''} onClick={() => setTab('payments')}><WalletCards size={18}/> Pagamentos e Asaas</button><button className={tab === 'regions' ? 'active' : ''} onClick={() => setTab('regions')}><MapPinned size={18}/> Regiões atendidas</button><button className={tab === 'push' ? 'active' : ''} onClick={() => setTab('push')}><BellRing size={18}/> Push</button></div>
+    <div className="tabs"><button className={tab === 'categories' ? 'active' : ''} onClick={() => setTab('categories')}><CarFront size={18}/> Categorias e tarifas</button><button className={tab === 'dispatch' ? 'active' : ''} onClick={() => setTab('dispatch')}><Settings2 size={18}/> Despacho e plataforma</button><button className={tab === 'payments' ? 'active' : ''} onClick={() => setTab('payments')}><WalletCards size={18}/> Pagamentos e gateways</button><button className={tab === 'regions' ? 'active' : ''} onClick={() => setTab('regions')}><MapPinned size={18}/> Regiões atendidas</button><button className={tab === 'push' ? 'active' : ''} onClick={() => setTab('push')}><BellRing size={18}/> Push</button></div>
     {loading ? <LoadingState/> : tab === 'categories'
       ? <CategorySettings categories={categories} fareFor={fareFor} saving={saving} onSave={saveFare}/>
       : tab === 'dispatch'
         ? <DispatchSettings values={settings} onChange={setSettings} onSave={saveSettings} saving={saving}/>
         : tab === 'payments'
-          ? <PaymentGatewaySettings values={settings} health={asaasHealth} onChange={setSettings} onSave={saveSettings} onCheck={checkAsaas} saving={saving} checking={checkingAsaas}/>
+          ? <PaymentGatewaySettings values={settings} asaasHealth={asaasHealth} openpixHealth={openpixHealth} onChange={setSettings} onSave={saveSettings} onCheckAsaas={checkAsaas} onCheckOpenpix={checkOpenpix} saving={saving} checkingAsaas={checkingAsaas} checkingOpenpix={checkingOpenpix}/>
           : tab === 'regions'
             ? <RegionSettings regions={regions} assignments={regionCategories} onAdd={() => setRegionModal({ ...emptyRegion })} onEdit={setRegionModal}/>
             : <PushOverview value={pushOverview}/>} 
@@ -159,31 +180,46 @@ function DispatchSettings({ values, onChange, onSave, saving }: { values: any; o
   </div>;
 }
 
-function PaymentGatewaySettings({ values, health, onChange, onSave, onCheck, saving, checking }: { values: any; health: any; onChange: (value: any) => void; onSave: () => void; onCheck: () => void; saving: boolean; checking: boolean }) {
-  const invalidGateway = !values.asaas_pix_enabled && (values.pix_online_provider === 'asaas' || values.driver_wallet_pix_provider === 'asaas' || values.asaas_payout_enabled);
+function PaymentGatewaySettings({ values, asaasHealth, openpixHealth, onChange, onSave, onCheckAsaas, onCheckOpenpix, saving, checkingAsaas, checkingOpenpix }: { values: any; asaasHealth: any; openpixHealth: any; onChange: (value: any) => void; onSave: () => void; onCheckAsaas: () => void; onCheckOpenpix: () => void; saving: boolean; checkingAsaas: boolean; checkingOpenpix: boolean }) {
+  const validProviders = ['stripe', 'asaas', 'openpix'];
+  const invalidProvider = !validProviders.includes(String(values.pix_online_provider ?? '')) || !validProviders.includes(String(values.driver_wallet_pix_provider ?? ''));
+  const invalidAsaas = !values.asaas_pix_enabled && (values.pix_online_provider === 'asaas' || values.driver_wallet_pix_provider === 'asaas' || values.asaas_payout_enabled);
+  const invalidOpenpix = !values.openpix_pix_enabled && (values.pix_online_provider === 'openpix' || values.driver_wallet_pix_provider === 'openpix' || values.openpix_payout_enabled);
   const invalidWallet = Number(values.driver_wallet_negative_limit) < Number(values.driver_wallet_warning_limit);
-  const healthy = Boolean(health?.ready && health?.webhook_ready);
+  const providerName = (value: string) => value === 'asaas' ? 'Asaas' : value === 'openpix' ? 'OpenPix' : value === 'stripe' ? 'Stripe' : 'não selecionado';
+  const asaasHealthy = Boolean(asaasHealth?.ready && asaasHealth?.webhook_ready);
+  const openpixHealthy = Boolean(openpixHealth?.ready && openpixHealth?.webhook_ready);
+  const openpixWebhookEvents = Object.entries(openpixHealth?.webhook_event_status ?? {}) as [string, any][];
   return <div className="settings-stack">
-    <Section title="Status do gateway Asaas" description="Valide os Secrets e o webhook antes de liberar cobranças reais.">
-      <div className={`settings-notice ${healthy ? 'success' : 'danger'}`}>
-        {healthy ? <CheckCircle2 size={18}/> : <AlertCircle size={18}/>}<span><strong>{healthy ? 'Asaas pronto' : 'Asaas requer configuração'}</strong> · {health?.message || 'Clique em validar conexão para consultar o backend.'}{health?.webhook_message && health.webhook_message !== health.message ? ` ${health.webhook_message}` : ''}{Number(health?.requeued_webhook_events ?? 0) > 0 ? ` Reenfileirados agora: ${health.requeued_webhook_events}.` : ''}{Number(health?.failed_webhook_events ?? 0) > 0 ? ` Eventos ainda pendentes: ${health.failed_webhook_events}.` : ''}{health?.environment ? ` Ambiente: ${health.environment}.` : ''}{health?.backend_version ? ` Backend ${health.backend_version}.` : ''}</span>
-        <button className="gateway-check-button" disabled={checking} onClick={onCheck}><RefreshCw size={16}/>{checking ? 'Validando...' : 'Validar conexão'}</button>
+    <Section title="Status dos gateways" description="As credenciais ficam somente nos Secrets do Supabase. Cada provedor é validado e conciliado de forma independente.">
+      <div className={`settings-notice ${asaasHealthy ? 'success' : 'danger'}`}>
+        {asaasHealthy ? <CheckCircle2 size={18}/> : <AlertCircle size={18}/>}<span><strong>{asaasHealthy ? 'Asaas pronto' : 'Asaas requer configuração'}</strong> · {asaasHealth?.message || 'Valide a conexão.'}{asaasHealth?.environment ? ` Ambiente: ${asaasHealth.environment}.` : ''}</span>
+        <button className="gateway-check-button" disabled={checkingAsaas} onClick={onCheckAsaas}><RefreshCw size={16}/>{checkingAsaas ? 'Validando...' : 'Validar Asaas'}</button>
       </div>
+      <div className={`settings-notice ${openpixHealthy ? 'success' : 'danger'}`}>
+        {openpixHealthy ? <CheckCircle2 size={18}/> : <AlertCircle size={18}/>}<span><strong>{openpixHealthy ? 'OpenPix pronta' : 'OpenPix requer configuração'}</strong> · {openpixHealth?.message || 'Valide a conexão.'}{openpixHealth?.webhook_message ? ` ${openpixHealth.webhook_message}` : ''}{openpixHealth?.payout_message ? ` ${openpixHealth.payout_message}` : ''}{openpixHealth?.environment ? ` Ambiente: ${openpixHealth.environment}.` : ''}</span>
+        <button className="gateway-check-button" disabled={checkingOpenpix} onClick={onCheckOpenpix}><RefreshCw size={16}/>{checkingOpenpix ? 'Validando...' : 'Validar OpenPix'}</button>
+      </div>
+      {openpixWebhookEvents.length > 0 && <div className="openpix-webhook-grid">{openpixWebhookEvents.map(([eventType, status]) => <div className={`openpix-webhook-item ${Number(status?.received ?? 0) > 0 ? 'received' : 'waiting'}`} key={eventType}><strong>{eventType.replace('OPENPIX:', '')}</strong><span>{Number(status?.received ?? 0) > 0 ? `${status.received} recebido(s)` : 'Aguardando evento real'}</span>{status?.signature_key && <small>HMAC: {status.signature_key}</small>}</div>)}</div>}
     </Section>
-    <Section title="Pix online e repasses" description="A seleção altera somente novas cobranças. Transações antigas permanecem vinculadas ao provedor original.">
+    <Section title="Pix online e repasses" description="A seleção é determinística: Stripe usa Stripe, Asaas usa Asaas e OpenPix usa OpenPix. Não existe fallback automático.">
       <div className="form-grid two-col">
-        <WalletSwitch label="Habilitar Asaas Pix" description="Libera o Asaas depois que ASAAS_API_KEY e ASAAS_WEBHOOK_TOKEN forem validados." checked={Boolean(values.asaas_pix_enabled)} onChange={(checked) => onChange({ ...values, asaas_pix_enabled: checked })}/>
-        <WalletSwitch label="Repasse Pix Asaas" description="Envia automaticamente o ganho líquido à chave Pix cadastrada pelo motorista." checked={Boolean(values.asaas_payout_enabled)} onChange={(checked) => onChange({ ...values, asaas_payout_enabled: checked })}/>
-        <label className="field"><span>Pix pago pelos clientes</span><select value={values.pix_online_provider ?? 'stripe'} onChange={(event) => onChange({ ...values, pix_online_provider: event.target.value })}><option value="stripe">Stripe Pix</option><option value="asaas">Asaas Pix</option></select></label>
-        <label className="field"><span>Pix para regularizar carteira</span><select value={values.driver_wallet_pix_provider ?? 'stripe'} onChange={(event) => onChange({ ...values, driver_wallet_pix_provider: event.target.value })}><option value="stripe">Stripe Pix</option><option value="asaas">Asaas Pix</option></select></label>
+        <WalletSwitch label="Habilitar Asaas Pix" description="Mantém cobranças e estornos Pix pelo Asaas disponíveis." checked={Boolean(values.asaas_pix_enabled)} onChange={(checked) => onChange({ ...values, asaas_pix_enabled: checked })}/>
+        <WalletSwitch label="Repasse Pix Asaas" description="Envia o ganho líquido pela chave Pix do motorista usando o Asaas." checked={Boolean(values.asaas_payout_enabled)} onChange={(checked) => onChange({ ...values, asaas_payout_enabled: checked })}/>
+        <WalletSwitch label="Habilitar OpenPix" description="Libera cobranças, QR Code, webhook e estornos pela OpenPix." checked={Boolean(values.openpix_pix_enabled)} onChange={(checked) => onChange({ ...values, openpix_pix_enabled: checked })}/>
+        <WalletSwitch label="Repasse PIX OUT OpenPix" description="Exige PIX OUT/API MASTER habilitado na conta OpenPix." checked={Boolean(values.openpix_payout_enabled)} onChange={(checked) => onChange({ ...values, openpix_payout_enabled: checked })}/>
+        <label className="field"><span>Pix pago pelos clientes</span><select value={values.pix_online_provider ?? ''} onChange={(event) => onChange({ ...values, pix_online_provider: event.target.value })}><option value="" disabled>Selecione o gateway</option><option value="stripe">Stripe Pix</option><option value="asaas">Asaas Pix</option><option value="openpix">OpenPix</option></select></label>
+        <label className="field"><span>Pix para regularizar carteira</span><select value={values.driver_wallet_pix_provider ?? ''} onChange={(event) => onChange({ ...values, driver_wallet_pix_provider: event.target.value })}><option value="" disabled>Selecione o gateway</option><option value="stripe">Stripe Pix</option><option value="asaas">Asaas Pix</option><option value="openpix">OpenPix</option></select></label>
       </div>
-      {invalidGateway && <p className="field-error">Ative o Asaas antes de selecioná-lo para cobranças, carteira ou repasses.</p>}
-      <p className="section-note">Cartões, Google Pay e Apple Pay continuam exclusivamente na Stripe. As credenciais Asaas permanecem apenas nos Secrets do Supabase.</p>
+      {invalidProvider && <p className="field-error">Selecione explicitamente um gateway válido para o PIX dos clientes e para a carteira dos motoristas. Não existe seleção automática.</p>}
+      {invalidAsaas && <p className="field-error">Ative o Asaas antes de selecioná-lo para cobranças, carteira ou repasses.</p>}
+      {invalidOpenpix && <p className="field-error">Ative a OpenPix antes de selecioná-la para cobranças, carteira ou repasses.</p>}
+      <p className="section-note">Cartões, Google Pay e Apple Pay continuam exclusivamente na Stripe. Cobranças já criadas permanecem ligadas ao gateway original.</p>
     </Section>
     <Section title="Carteira dos motoristas" description="Taxas de corridas físicas geram saldo devedor; corridas digitais compensam esse saldo antes do repasse.">
-      <div className="form-grid three-col"><NumberField label="Avisar a partir de (R$)" min={0} value={values.driver_wallet_warning_limit} onChange={(value) => onChange({ ...values, driver_wallet_warning_limit: value })}/><NumberField label="Suspender a partir de (R$)" min={1} value={values.driver_wallet_negative_limit} onChange={(value) => onChange({ ...values, driver_wallet_negative_limit: value })}/><NumberField label="Pagamento mínimo (R$)" min={1} value={values.driver_wallet_topup_min_amount} onChange={(value) => onChange({ ...values, driver_wallet_topup_min_amount: value })}/><WalletSwitch label="Carteira ativa" description="Aplica conciliação nas novas corridas concluídas." checked={Boolean(values.driver_wallet_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_enabled: checked })}/><WalletSwitch label="Pagamento por Pix" description={`Permite regularização imediata pelo ${values.driver_wallet_pix_provider === 'asaas' ? 'Asaas' : 'Stripe'}.`} checked={Boolean(values.driver_wallet_pix_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_pix_enabled: checked })}/><WalletSwitch label="Pagamento por boleto" description="Permite quitação com compensação bancária." checked={Boolean(values.driver_wallet_boleto_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_boleto_enabled: checked })}/><WalletSwitch label="Pagamento por cartão" description="Abre o Stripe PaymentSheet no app do motorista." checked={Boolean(values.driver_wallet_card_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_card_enabled: checked })}/><WalletSwitch label="Usar saldo Stripe" description="Permite quitar a dívida com saldo reversível de repasses Stripe Connect anteriores." checked={Boolean(values.driver_wallet_stripe_balance_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_stripe_balance_enabled: checked })}/><WalletSwitch label="Recuperação automática" description="Mantém somente corridas digitais quando o limite for atingido e existir Stripe Connect ou chave Pix Asaas pronta." checked={Boolean(values.driver_wallet_auto_recovery)} onChange={(checked) => onChange({ ...values, driver_wallet_auto_recovery: checked })}/></div>
-      <div className="form-footer"><button className="button primary" disabled={saving || invalidGateway || invalidWallet} onClick={onSave}><Save size={17}/> Publicar pagamentos</button></div>
+      <div className="form-grid three-col"><NumberField label="Avisar a partir de (R$)" min={0} value={values.driver_wallet_warning_limit} onChange={(value) => onChange({ ...values, driver_wallet_warning_limit: value })}/><NumberField label="Suspender a partir de (R$)" min={1} value={values.driver_wallet_negative_limit} onChange={(value) => onChange({ ...values, driver_wallet_negative_limit: value })}/><NumberField label="Pagamento mínimo (R$)" min={1} value={values.driver_wallet_topup_min_amount} onChange={(value) => onChange({ ...values, driver_wallet_topup_min_amount: value })}/><WalletSwitch label="Carteira ativa" description="Aplica conciliação nas novas corridas concluídas." checked={Boolean(values.driver_wallet_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_enabled: checked })}/><WalletSwitch label="Pagamento por Pix" description={`Regularização pelo gateway selecionado: ${providerName(values.driver_wallet_pix_provider)}.`} checked={Boolean(values.driver_wallet_pix_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_pix_enabled: checked })}/><WalletSwitch label="Pagamento por boleto" description="Permite quitação com compensação bancária pela Stripe." checked={Boolean(values.driver_wallet_boleto_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_boleto_enabled: checked })}/><WalletSwitch label="Pagamento por cartão" description="Abre o Stripe PaymentSheet no app do motorista." checked={Boolean(values.driver_wallet_card_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_card_enabled: checked })}/><WalletSwitch label="Usar saldo Stripe" description="Permite compensação com saldo disponível da conta Connect." checked={Boolean(values.driver_wallet_stripe_balance_enabled)} onChange={(checked) => onChange({ ...values, driver_wallet_stripe_balance_enabled: checked })}/><WalletSwitch label="Recuperação automática" description="Retém saldo devedor antes do próximo repasse digital." checked={Boolean(values.driver_wallet_auto_recovery)} onChange={(checked) => onChange({ ...values, driver_wallet_auto_recovery: checked })}/></div>
       {invalidWallet && <p className="field-error">O limite de suspensão precisa ser maior ou igual ao limite de aviso.</p>}
+      <div className="form-footer"><button className="button primary" disabled={saving || invalidProvider || invalidAsaas || invalidOpenpix || invalidWallet} onClick={onSave}><Save size={17}/> Salvar pagamentos</button></div>
     </Section>
   </div>;
 }

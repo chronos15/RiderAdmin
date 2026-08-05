@@ -23,7 +23,7 @@ const navigation: Array<{ view: AdminView; label: string; icon: typeof Activity 
   { view: 'clients', label: 'Clientes', icon: Users },
   { view: 'rides', label: 'Corridas', icon: Activity },
   { view: 'finance', label: 'Financeiro', icon: BadgeDollarSign },
-  { view: 'payments', label: 'Pagamentos e Asaas', icon: WalletCards },
+  { view: 'payments', label: 'Pagamentos e gateways', icon: WalletCards },
   { view: 'safety', label: 'Segurança', icon: ShieldCheck },
   { view: 'support', label: 'Suporte', icon: Headphones },
   { view: 'ratings', label: 'Avaliações', icon: Star },

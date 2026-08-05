@@ -1157,3 +1157,10 @@ select, .date-filter { min-height: 42px; border: 1px solid var(--border); border
   .map-focus-ride { top: 14px; right: 10px; }
   .map-live-caption { left: 10px; bottom: 10px; max-width: calc(100% - 90px); }
 }
+
+.openpix-webhook-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin: -4px 0 16px; }
+.openpix-webhook-item { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft); font-size: 11px; }
+.openpix-webhook-item strong { font-size: 11px; overflow-wrap: anywhere; }
+.openpix-webhook-item span, .openpix-webhook-item small { color: var(--muted); }
+.openpix-webhook-item.received { border-color: rgba(16,185,129,.35); background: rgba(16,185,129,.07); }
+.openpix-webhook-item.waiting { border-color: rgba(245,158,11,.28); background: rgba(245,158,11,.05); }

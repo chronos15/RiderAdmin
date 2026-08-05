@@ -150,7 +150,7 @@ export function FinancePage() {
     {loading ? <LoadingState label="Conciliando pagamentos..."/> : <>
       <Section
         title="Integridade financeira"
-        description={`Verificação gerada em ${integrity?.generated_at ? dateTime(integrity.generated_at) : 'tempo real'}. A fila interna permite recuperar eventos mesmo quando o Asaas os entrega fora de ordem.`}
+        description={`Verificação gerada em ${integrity?.generated_at ? dateTime(integrity.generated_at) : 'tempo real'}. As filas internas recuperam eventos mesmo quando Asaas ou OpenPix os entregam fora de ordem.`}
         actions={<Badge status={integrityProblems > 0 ? 'pending' : 'active'} label={integrityProblems > 0 ? `${integrityProblems} ponto(s) de atenção` : 'Sem divergências detectadas'}/>}
       >
         <div className="stats-grid finance-stats">
@@ -206,7 +206,7 @@ export function FinancePage() {
             <td>{dateTime(item.created_at)}</td><td><strong>{item.driver_name}</strong></td>
             <td><strong>{humanize(item.provider)}</strong><span className="table-sub">{humanize(item.method)}</span></td>
             <td><Badge status={item.status}/>{item.provider_status && <span className="table-sub">Gateway: {item.provider_status}</span>}{item.status_detail && <span className="table-sub">{item.status_detail}</span>}</td>
-            <td>{money(item.amount)}</td><td>{item.asaas_payment_id ?? item.stripe_payment_intent_id ?? item.stripe_checkout_session_id ?? '—'}</td>
+            <td>{money(item.amount)}</td><td>{item.openpix_charge_id ?? item.asaas_payment_id ?? item.stripe_payment_intent_id ?? item.stripe_checkout_session_id ?? '—'}</td>
           </tr>)}
         </tbody></table></div> : <EmptyState title="Nenhuma regularização" description="Pix e boletos criados no aplicativo do motorista aparecerão aqui."/>}
       </Section>
@@ -219,7 +219,7 @@ export function FinancePage() {
             <td><Badge status={item.status}/>{item.provider_status && <span className="table-sub">Gateway: {item.provider_status}</span>}{item.status_detail && <span className="table-sub">{item.status_detail}</span>}{item.reconciliation_error && <span className="table-sub">Conciliação: {item.reconciliation_error}</span>}</td>
             <td>{money(item.amount)}{Number(item.refunded_amount ?? 0) > 0 && <span className="table-sub">Estornado {money(item.refunded_amount)} · retido {money(item.retained_amount)}</span>}</td>
             <td>{item.provider_payment_id ?? item.provider_external_reference ?? item.external_reference ?? '—'}</td>
-            <td>{['approved', 'partially_refunded'].includes(item.status) && ['stripe', 'asaas'].includes(item.provider)
+            <td>{['approved', 'partially_refunded'].includes(item.status) && ['stripe', 'asaas', 'openpix'].includes(item.provider)
               ? <button className="button compact secondary" disabled={refundingId === item.id} onClick={() => void refund(item)}><RotateCcw size={14}/>{refundingId === item.id ? 'Estornando...' : 'Estornar'}</button>
               : '—'}</td>
           </tr>)}
