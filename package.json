@@ -1,11 +1,11 @@
 {
   "name": "riderx-admin-panel",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "node ./node_modules/typescript/bin/tsc && node ./node_modules/vite/bin/vite.js build",
+    "build": "tsc && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build"
@@ -22,7 +22,6 @@
     "vite": "7.1.9"
   },
   "devDependencies": {
-    "@types/geojson": "^7946.0.16",
     "@types/react": "19.1.16",
     "@types/react-dom": "19.1.9",
     "typescript": "5.9.3"

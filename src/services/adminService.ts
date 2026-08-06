@@ -418,9 +418,17 @@ export const adminService = {
   },
 
   async platformSettings() {
-    const { data, error } = await supabase.from('platform_operation_settings').select('*').eq('id', 1).maybeSingle();
-    if (error) throw error;
-    return data;
+    const { data, error } = await supabase.rpc('admin_get_platform_operation_settings_rpc');
+    if (error) {
+      throw new Error(await readableFunctionInvokeError(
+        error,
+        'Não foi possível carregar as configurações operacionais. Aplique a migration 054 do Hotfix 10.46.36.',
+      ));
+    }
+    if (!data || typeof data !== 'object') {
+      throw new Error('O banco não retornou a configuração operacional principal.');
+    }
+    return data as Record<string, unknown>;
   },
 
   async asaasHealth() {
@@ -433,13 +441,33 @@ export const adminService = {
 
   async openpixHealth() {
     const { data, error } = await supabase.functions.invoke('openpix_gateway_admin', { body: { action: 'health' } });
-    if (error) throw new Error(await readableFunctionInvokeError(error, 'Falha ao consultar a Edge Function da OpenPix. Confira a migration 053 e a publicação da função.'));
+    if (error) throw new Error(await readableFunctionInvokeError(error, 'Falha ao consultar a Edge Function da OpenPix. Confira as migrations 053/054 e a publicação da função.'));
     const envelope = data && typeof data === 'object' ? data as Record<string, any> : {};
     if (envelope.error) throw new Error(readableServiceError(envelope.error, 'Falha ao validar a OpenPix.'));
     return envelope.data ?? envelope;
   },
 
-  async savePlatformSettings(payload: Record<string, unknown>) {
+  async saveDispatchSettings(payload: Record<string, unknown>) {
+    const allowedKeys = [
+      'search_radius_km', 'search_radius_step_km', 'max_search_radius_km',
+      'offer_timeout_seconds', 'search_timeout_minutes', 'location_update_seconds',
+      'platform_fee_percent', 'cancellation_fee', 'cancellation_arrived_fee',
+      'cancellation_grace_minutes', 'support_phone', 'emergency_phone', 'allow_test_mode',
+    ];
+    const cleanPayload = Object.fromEntries(
+      allowedKeys.filter((key) => Object.prototype.hasOwnProperty.call(payload, key)).map((key) => [key, payload[key]]),
+    );
+    const { data, error } = await supabase
+      .from('platform_operation_settings')
+      .update(cleanPayload)
+      .eq('id', 1)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async savePaymentGatewaySettings(payload: Record<string, unknown>) {
     const validProviders = new Set(['stripe', 'asaas', 'openpix']);
     const pixProvider = String(payload.pix_online_provider ?? '').trim().toLowerCase();
     const walletProvider = String(payload.driver_wallet_pix_provider ?? '').trim().toLowerCase();
@@ -447,21 +475,21 @@ export const adminService = {
       throw new Error('Selecione explicitamente Stripe, Asaas ou OpenPix para cada fluxo PIX. Não existe fallback automático.');
     }
     const usesAsaas = payload.asaas_pix_enabled === true || payload.asaas_payout_enabled === true ||
-      payload.pix_online_provider === 'asaas' || payload.driver_wallet_pix_provider === 'asaas';
+      pixProvider === 'asaas' || walletProvider === 'asaas';
     if (usesAsaas) {
       const health = await this.asaasHealth();
       if (!health.ready) throw new Error(health.message || 'Asaas não está configurado no backend.');
       if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure ASAAS_WEBHOOK_TOKEN e publique asaas_webhook antes de ativar o Asaas.');
     }
     const usesOpenpix = payload.openpix_pix_enabled === true || payload.openpix_payout_enabled === true ||
-      payload.pix_online_provider === 'openpix' || payload.driver_wallet_pix_provider === 'openpix';
+      pixProvider === 'openpix' || walletProvider === 'openpix';
     if (usesOpenpix) {
       const health = await this.openpixHealth();
       if (!health.ready) throw new Error(health.message || 'OpenPix não está configurada no backend.');
       if (health.database_ready === false) {
-        throw new Error(health.database_message || 'A estrutura OpenPix do banco não está atualizada. Aplique a migration 053 antes de publicar as configurações.');
+        throw new Error(health.database_message || 'A estrutura OpenPix do banco não está atualizada. Aplique a migration 054 antes de publicar as configurações.');
       }
-      if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure OPENPIX_WEBHOOK_SECRETS (ou o secret legado) e publique openpix_webhook antes de ativar a OpenPix.');
+      if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure OPENPIX_WEBHOOK_SECRETS e publique openpix_webhook antes de ativar a OpenPix.');
       if (payload.openpix_payout_enabled === true && !health.webhook_payout_events_ready) {
         throw new Error(health.payout_message || 'Configure os secrets HMAC dos eventos de repasse OpenPix antes de ativar o PIX OUT.');
       }
@@ -469,9 +497,50 @@ export const adminService = {
         throw new Error(health.payout_message || 'Habilite PIX OUT/API MASTER na OpenPix antes de ativar repasses automáticos.');
       }
     }
-    const { data, error } = await supabase.from('platform_operation_settings').upsert({ id: 1, ...payload }).select().single();
-    if (error) throw error;
-    return data;
+
+    const paymentPayload = {
+      pix_online_provider: pixProvider,
+      driver_wallet_pix_provider: walletProvider,
+      asaas_pix_enabled: payload.asaas_pix_enabled === true,
+      asaas_payout_enabled: payload.asaas_payout_enabled === true,
+      openpix_pix_enabled: payload.openpix_pix_enabled === true,
+      openpix_payout_enabled: payload.openpix_payout_enabled === true,
+      driver_wallet_enabled: payload.driver_wallet_enabled === true,
+      driver_wallet_warning_limit: payload.driver_wallet_warning_limit,
+      driver_wallet_negative_limit: payload.driver_wallet_negative_limit,
+      driver_wallet_topup_min_amount: payload.driver_wallet_topup_min_amount,
+      driver_wallet_pix_enabled: payload.driver_wallet_pix_enabled === true,
+      driver_wallet_boleto_enabled: payload.driver_wallet_boleto_enabled === true,
+      driver_wallet_card_enabled: payload.driver_wallet_card_enabled === true,
+      driver_wallet_stripe_balance_enabled: payload.driver_wallet_stripe_balance_enabled === true,
+      driver_wallet_auto_recovery: payload.driver_wallet_auto_recovery === true,
+    };
+
+    const { data, error } = await supabase.rpc('admin_save_payment_gateway_settings_rpc', {
+      p_settings: paymentPayload,
+    });
+    if (error) {
+      throw new Error(await readableFunctionInvokeError(
+        error,
+        'Não foi possível persistir os gateways. Aplique a migration 054 do Hotfix 10.46.36.',
+      ));
+    }
+    const persisted = data && typeof data === 'object' ? data as Record<string, unknown> : null;
+    if (!persisted) throw new Error('O banco não devolveu a confirmação das configurações de pagamento.');
+
+    const expected: Record<string, unknown> = {
+      pix_online_provider: pixProvider,
+      driver_wallet_pix_provider: walletProvider,
+      asaas_pix_enabled: paymentPayload.asaas_pix_enabled,
+      asaas_payout_enabled: paymentPayload.asaas_payout_enabled,
+      openpix_pix_enabled: paymentPayload.openpix_pix_enabled,
+      openpix_payout_enabled: paymentPayload.openpix_payout_enabled,
+    };
+    const mismatch = Object.entries(expected).find(([key, value]) => persisted[key] !== value);
+    if (mismatch) {
+      throw new Error(`Persistência divergente em ${mismatch[0]}. O banco não confirmou a seleção solicitada.`);
+    }
+    return persisted;
   },
 
   async pushOverview() {

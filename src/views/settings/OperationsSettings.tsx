@@ -84,7 +84,16 @@ export function OperationsSettings({ theme, initialTab = 'categories' }: { theme
 
   function fareFor(code: string) { return fares.find((item) => item.category_code === code) ?? { category_code: code, rate_multiplier: 1, minimum_multiplier: 1, base_fare: 0, price_per_km: 0, price_per_minute: 0, minimum_fare: 0, active: true }; }
   async function saveFare(code: string, patch: Record<string, unknown>) { await performSave(async () => { const current = fareFor(code); await adminService.upsertFare({ ...current, ...patch, category_code: code, vehicle_categories: undefined }); }, 'Tarifa atualizada e publicada nos apps.'); }
-  async function saveSettings() { await performSave(() => adminService.savePlatformSettings(settings), 'Configurações operacionais sincronizadas.'); }
+  async function saveSettings() {
+    if (tab === 'payments') {
+      await performSave(
+        () => adminService.savePaymentGatewaySettings(settings),
+        `Pagamentos persistidos: ${providerNameForNotice(settings.pix_online_provider)} para clientes e ${providerNameForNotice(settings.driver_wallet_pix_provider)} para carteira.`,
+      );
+      return;
+    }
+    await performSave(() => adminService.saveDispatchSettings(settings), 'Configurações operacionais sincronizadas.');
+  }
   async function saveRegion(payload: any, assignments: any[]) { if (await performSave(() => adminService.upsertRegion(payload, assignments), 'Região e categorias publicadas.')) setRegionModal(null); }
   async function deleteRegion(id: string) { if (await performSave(() => adminService.deleteRegion(id), 'Região removida ou desativada por possuir histórico.')) setRegionModal(null); }
 
@@ -259,6 +268,15 @@ function RegionEditor({ theme, open, value, categories, assignments, defaults, o
   </Modal>;
 }
 
+
+
+function providerNameForNotice(value: unknown): string {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'openpix') return 'OpenPix';
+  if (normalized === 'asaas') return 'Asaas';
+  if (normalized === 'stripe') return 'Stripe';
+  return 'não selecionado';
+}
 
 function WalletSwitch({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return <label className="switch-row"><div><strong>{label}</strong><span>{description}</span></div><label className="switch"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)}/><span/></label></label>;
