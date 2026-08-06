@@ -188,7 +188,7 @@ function PaymentGatewaySettings({ values, asaasHealth, openpixHealth, onChange, 
   const invalidWallet = Number(values.driver_wallet_negative_limit) < Number(values.driver_wallet_warning_limit);
   const providerName = (value: string) => value === 'asaas' ? 'Asaas' : value === 'openpix' ? 'OpenPix' : value === 'stripe' ? 'Stripe' : 'não selecionado';
   const asaasHealthy = Boolean(asaasHealth?.ready && asaasHealth?.webhook_ready);
-  const openpixHealthy = Boolean(openpixHealth?.ready && openpixHealth?.webhook_ready);
+  const openpixHealthy = Boolean(openpixHealth?.ready && openpixHealth?.database_ready !== false && openpixHealth?.webhook_ready);
   const openpixWebhookEvents = Object.entries(openpixHealth?.webhook_event_status ?? {}) as [string, any][];
   return <div className="settings-stack">
     <Section title="Status dos gateways" description="As credenciais ficam somente nos Secrets do Supabase. Cada provedor é validado e conciliado de forma independente.">
@@ -197,7 +197,7 @@ function PaymentGatewaySettings({ values, asaasHealth, openpixHealth, onChange, 
         <button className="gateway-check-button" disabled={checkingAsaas} onClick={onCheckAsaas}><RefreshCw size={16}/>{checkingAsaas ? 'Validando...' : 'Validar Asaas'}</button>
       </div>
       <div className={`settings-notice ${openpixHealthy ? 'success' : 'danger'}`}>
-        {openpixHealthy ? <CheckCircle2 size={18}/> : <AlertCircle size={18}/>}<span><strong>{openpixHealthy ? 'OpenPix pronta' : 'OpenPix requer configuração'}</strong> · {openpixHealth?.message || 'Valide a conexão.'}{openpixHealth?.webhook_message ? ` ${openpixHealth.webhook_message}` : ''}{openpixHealth?.payout_message ? ` ${openpixHealth.payout_message}` : ''}{openpixHealth?.environment ? ` Ambiente: ${openpixHealth.environment}.` : ''}</span>
+        {openpixHealthy ? <CheckCircle2 size={18}/> : <AlertCircle size={18}/>}<span><strong>{openpixHealthy ? 'OpenPix pronta' : 'OpenPix requer configuração'}</strong> · {openpixHealth?.message || 'Valide a conexão.'}{openpixHealth?.database_ready === false && openpixHealth?.database_message ? ` ${openpixHealth.database_message}` : ''}{openpixHealth?.webhook_message ? ` ${openpixHealth.webhook_message}` : ''}{openpixHealth?.payout_message ? ` ${openpixHealth.payout_message}` : ''} <b>Ambiente: produção exclusiva.</b>{openpixHealth?.app_id_configured === false ? ' AppID ausente no Supabase.' : ''}{openpixHealth?.backend_version ? ` Backend: ${openpixHealth.backend_version}.` : ''}</span>
         <button className="gateway-check-button" disabled={checkingOpenpix} onClick={onCheckOpenpix}><RefreshCw size={16}/>{checkingOpenpix ? 'Validando...' : 'Validar OpenPix'}</button>
       </div>
       {openpixWebhookEvents.length > 0 && <div className="openpix-webhook-grid">{openpixWebhookEvents.map(([eventType, status]) => <div className={`openpix-webhook-item ${Number(status?.received ?? 0) > 0 ? 'received' : 'waiting'}`} key={eventType}><strong>{eventType.replace('OPENPIX:', '')}</strong><span>{Number(status?.received ?? 0) > 0 ? `${status.received} recebido(s)` : 'Aguardando evento real'}</span>{status?.signature_key && <small>HMAC: {status.signature_key}</small>}</div>)}</div>}

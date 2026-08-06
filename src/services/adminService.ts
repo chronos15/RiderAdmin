@@ -21,6 +21,28 @@ function readableServiceError(value: unknown, fallback: string): string {
   return fallback;
 }
 
+async function readableFunctionInvokeError(value: unknown, fallback: string): Promise<string> {
+  if (value && typeof value === 'object') {
+    const context = (value as Record<string, any>).context;
+    if (context && typeof context.clone === 'function') {
+      try {
+        const response = context.clone() as Response;
+        const status = Number(response.status || 0);
+        const text = await response.text();
+        if (text) {
+          let payload: unknown = text;
+          try { payload = JSON.parse(text); } catch (_) { /* resposta textual */ }
+          const detail = readableServiceError(payload, '');
+          if (detail) return status > 0 ? `${detail} (HTTP ${status})` : detail;
+        }
+        if (status > 0) return `${fallback} (HTTP ${status})`;
+      } catch (_) { /* usa fallback abaixo */ }
+    }
+  }
+  const detail = readableServiceError(value, '');
+  return detail && detail !== 'Edge Function returned a non-2xx status code' ? detail : fallback;
+}
+
 async function rpcOrFallback<T>(rpcName: string, args: Record<string, unknown> | undefined, fallback: () => Promise<T>): Promise<T> {
   const { data, error } = await supabase.rpc(rpcName, args);
   if (!error) return data as T;
@@ -403,7 +425,7 @@ export const adminService = {
 
   async asaasHealth() {
     const { data, error } = await supabase.functions.invoke('asaas_gateway_admin', { body: { action: 'health' } });
-    if (error) throw error;
+    if (error) throw new Error(await readableFunctionInvokeError(error, 'Falha ao consultar a Edge Function do Asaas.'));
     const envelope = data && typeof data === 'object' ? data as Record<string, any> : {};
     if (envelope.error) throw new Error(readableServiceError(envelope.error, 'Falha ao validar o Asaas.'));
     return envelope.data ?? envelope;
@@ -411,7 +433,7 @@ export const adminService = {
 
   async openpixHealth() {
     const { data, error } = await supabase.functions.invoke('openpix_gateway_admin', { body: { action: 'health' } });
-    if (error) throw error;
+    if (error) throw new Error(await readableFunctionInvokeError(error, 'Falha ao consultar a Edge Function da OpenPix. Confira a migration 053 e a publicação da função.'));
     const envelope = data && typeof data === 'object' ? data as Record<string, any> : {};
     if (envelope.error) throw new Error(readableServiceError(envelope.error, 'Falha ao validar a OpenPix.'));
     return envelope.data ?? envelope;
@@ -436,6 +458,9 @@ export const adminService = {
     if (usesOpenpix) {
       const health = await this.openpixHealth();
       if (!health.ready) throw new Error(health.message || 'OpenPix não está configurada no backend.');
+      if (health.database_ready === false) {
+        throw new Error(health.database_message || 'A estrutura OpenPix do banco não está atualizada. Aplique a migration 053 antes de publicar as configurações.');
+      }
       if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure OPENPIX_WEBHOOK_SECRETS (ou o secret legado) e publique openpix_webhook antes de ativar a OpenPix.');
       if (payload.openpix_payout_enabled === true && !health.webhook_payout_events_ready) {
         throw new Error(health.payout_message || 'Configure os secrets HMAC dos eventos de repasse OpenPix antes de ativar o PIX OUT.');
