@@ -490,6 +490,9 @@ export const adminService = {
         throw new Error(health.database_message || 'A estrutura OpenPix do banco não está atualizada. Aplique a migration 054 antes de publicar as configurações.');
       }
       if (!health.webhook_ready) throw new Error(health.webhook_message || 'Configure OPENPIX_WEBHOOK_SECRETS e publique openpix_webhook antes de ativar a OpenPix.');
+      if (payload.openpix_payout_enabled === true && health.pixout_enabled !== true) {
+        throw new Error('O PIX OUT está desativado nos Secrets do Supabase. Ative OPENPIX_PIXOUT_ENABLED=true e republique as funções OpenPix antes de habilitar o repasse automático no Admin.');
+      }
       if (payload.openpix_payout_enabled === true && !health.webhook_payout_events_ready) {
         throw new Error(health.payout_message || 'Configure os secrets HMAC dos eventos de repasse OpenPix antes de ativar o PIX OUT.');
       }
